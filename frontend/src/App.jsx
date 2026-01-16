@@ -6,6 +6,7 @@ import Dashboard from './components/Dashboard'
 import Leaderboard from './components/Leaderboard'
 import Onboarding from './components/Onboarding'
 import LandingPage from './components/LandingPage'
+import AdminDashboard from './components/AdminDashboard'
 import Navbar from './components/Navbar'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
@@ -30,6 +31,7 @@ function AppContent() {
         <Route path="/onboarding" element={user ? <Onboarding /> : <Navigate to="/login" />} />
         <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/login" />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
+        <Route path="/admin" element={user?.role === 'admin' ? <AdminDashboard /> : <Navigate to="/dashboard" />} />
         <Route path="/" element={user ? <Navigate to="/dashboard" /> : <LandingPage />} />
       </Routes>
     </div>

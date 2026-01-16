@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import ATSResults from './ATSResults'
 
@@ -11,10 +11,40 @@ export default function ResumeUpload({ onScoreUpdate }) {
   const fileInputRef = useRef(null)
   const { apiCall } = useAuth()
 
+  // Fetch persisted resume status on mount (backend as single source of truth)
+  useEffect(() => {
+    fetchResumeStatus()
+  }, [])
+
+  const fetchResumeStatus = async () => {
+    try {
+      const response = await apiCall('/me/resume')
+      if (response.ok) {
+        const data = await response.json()
+        if (data.hasResume && data.resume.status === 'scored') {
+          // Hydrate results from backend
+          setResults({
+            score: data.resume.atsScore || 0,
+            feedback: [],
+            breakdown: {},
+            contact: {},
+            parsedSkills: data.resume.parsedSkills || [],
+            similarityMethod: 'Backend Persisted',
+            modelInfo: {},
+            rawText: '',
+            parsingErrors: []
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching resume status:', error)
+    }
+  }
+
   // Extract key improvement points from feedback
   const extractKeyImprovements = (feedback) => {
     const improvements = []
-    
+
     feedback.forEach(item => {
       if (item.includes('Missing') && item.includes('section')) {
         if (item.includes('Education')) improvements.push('• Add Education section')
@@ -27,7 +57,7 @@ export default function ResumeUpload({ onScoreUpdate }) {
       if (item.includes('Moderate semantic match')) improvements.push('• Align experience with job requirements')
       if (item.includes('Formatting risk')) improvements.push('• Improve document formatting')
     })
-    
+
     // Limit to top 4 most important improvements
     return improvements.slice(0, 4)
   }
@@ -62,7 +92,7 @@ export default function ResumeUpload({ onScoreUpdate }) {
 
     try {
       console.log('Starting upload process for file:', file.name)
-      
+
       setUploadStatus('Processing resume with ATS...')
 
       // Step 1: Send to ATS service for processing
@@ -96,7 +126,7 @@ export default function ResumeUpload({ onScoreUpdate }) {
 
       setUploadStatus('')
       setError('')
-      
+
       // Display full ATS results
       const resultsData = {
         score: atsData.atsScore || 0,
@@ -109,10 +139,10 @@ export default function ResumeUpload({ onScoreUpdate }) {
         rawText: atsData.rawText || '',
         parsingErrors: atsData.parsingErrors || []
       }
-      
+
       console.log('Setting results:', resultsData)
       setResults(resultsData)
-      
+
       // Scroll to results
       setTimeout(() => {
         const resultsElement = document.querySelector('[data-results-container]')
@@ -168,11 +198,10 @@ export default function ResumeUpload({ onScoreUpdate }) {
         </div>
 
         <div
-          className={`border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 ${
-            file 
-              ? 'border-green-300 dark:border-green-600 bg-gradient-to-br from-green-50 dark:from-slate-700 to-emerald-50 dark:to-slate-600 hover-glow' 
+          className={`border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 ${file
+              ? 'border-green-300 dark:border-green-600 bg-gradient-to-br from-green-50 dark:from-slate-700 to-emerald-50 dark:to-slate-600 hover-glow'
               : 'border-gray-300 dark:border-slate-600 bg-gradient-to-br from-gray-50 dark:from-slate-700 to-white dark:to-slate-800 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-gradient-to-br hover:from-blue-50 dark:hover:from-slate-700 hover:to-indigo-50 dark:hover:to-slate-600'
-          }`}
+            }`}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
         >
@@ -280,7 +309,7 @@ export default function ResumeUpload({ onScoreUpdate }) {
         {/* Results Display */}
         {results && (
           <div data-results-container>
-            <ATSResults 
+            <ATSResults
               score={results.score}
               feedback={results.feedback}
               breakdown={results.breakdown}

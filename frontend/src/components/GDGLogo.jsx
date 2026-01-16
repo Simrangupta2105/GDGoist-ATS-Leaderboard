@@ -1,13 +1,15 @@
 import React from 'react'
 
 export default function GDGLogo({ size = 'md', showText = true, variant = 'full' }) {
+  // Logo sizes - kept subtle and non-dominant
   const sizeClasses = {
-    sm: 'w-6 h-6',
-    md: 'w-10 h-10',
-    lg: 'w-12 h-12',
-    xl: 'w-16 h-16',
+    sm: 'w-5 h-5',      // Reduced from w-6 h-6
+    md: 'w-8 h-8',      // Reduced from w-10 h-10
+    lg: 'w-10 h-10',    // Reduced from w-12 h-12
+    xl: 'w-12 h-12',    // Reduced from w-16 h-16
   }
 
+  // Text sizing - maintains readability
   const textSizeClasses = {
     sm: { title: 'text-sm', subtitle: 'text-xs' },
     md: { title: 'text-base', subtitle: 'text-xs' },
@@ -16,10 +18,10 @@ export default function GDGLogo({ size = 'md', showText = true, variant = 'full'
   }
 
   return (
-    <div className="flex items-center gap-3">
-      {/* GDG Logo - Subtle, understated */}
+    <div className="flex items-center gap-2.5">
+      {/* GDG Logo - Subtle, understated, on the LEFT */}
       <div className={`${sizeClasses[size]} relative flex items-center justify-center flex-shrink-0`}>
-        <svg viewBox="0 0 120 120" className="w-full h-full opacity-90">
+        <svg viewBox="0 0 120 120" className="w-full h-full opacity-75">
           {/* Blue rounded pill - left bottom */}
           <path
             d="M 15 55 Q 15 40 25 35 L 45 25 Q 55 20 60 30 L 60 80 Q 55 90 45 85 L 25 75 Q 15 70 15 55 Z"
@@ -54,20 +56,23 @@ export default function GDGLogo({ size = 'md', showText = true, variant = 'full'
         <div className="flex flex-col leading-tight">
           {variant === 'full' ? (
             <>
+              {/* Primary: Product Name */}
               <span
                 className={`${textSizeClasses[size].title} font-semibold tracking-tight`}
                 style={{ color: 'var(--text-primary)' }}
               >
                 ATS Leaderboard
               </span>
+              {/* Secondary: Institutional Affiliation */}
               <span
-                className={`${textSizeClasses[size].subtitle} font-normal`}
-                style={{ color: 'var(--text-muted)', opacity: 0.7 }}
+                className={`${textSizeClasses[size].subtitle} font-normal mt-0.5`}
+                style={{ color: 'var(--text-muted)', opacity: 0.65 }}
               >
                 GDG on Campus OIST
               </span>
             </>
           ) : (
+            /* Compact variant: Product name only */
             <span
               className={`${textSizeClasses[size].title} font-semibold tracking-tight`}
               style={{ color: 'var(--text-primary)' }}

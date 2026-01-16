@@ -47,6 +47,30 @@ export default function Dashboard() {
 
   const fetchUserScore = async () => {
     try {
+      // Fetch real score from backend (single source of truth)
+      const response = await apiCall('/score/breakdown')
+      if (response.ok) {
+        const data = await response.json()
+        setUserScore({
+          totalScore: data.totalScore || 0,
+          atsComponent: data.components?.ats?.score || 0,
+          gitComponent: data.components?.github?.score || 0,
+          badgeComponent: data.components?.badges?.score || 0,
+          rank: null
+        })
+      } else {
+        // No score yet - set to zeros
+        setUserScore({
+          totalScore: 0,
+          atsComponent: 0,
+          gitComponent: 0,
+          badgeComponent: 0,
+          rank: null
+        })
+      }
+    } catch (error) {
+      console.error('Error fetching user score:', error)
+      // Fallback to zeros on error
       setUserScore({
         totalScore: 0,
         atsComponent: 0,
@@ -54,8 +78,6 @@ export default function Dashboard() {
         badgeComponent: 0,
         rank: null
       })
-    } catch (error) {
-      console.error('Error fetching user score:', error)
     }
   }
 

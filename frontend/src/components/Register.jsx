@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import gdgLogo from '../assets/gdg-logo.png'
 
 export default function Register() {
   const [name, setName] = useState('')
@@ -43,16 +44,26 @@ export default function Register() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <div className="w-full max-w-md">
-        {/* Header Section */}
+        {/* Header Section - Centered */}
         <div className="text-center mb-10 animate-fadeIn">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-6" style={{ backgroundColor: 'rgba(132, 89, 43, 0.1)', border: '1px solid rgba(132, 89, 43, 0.2)' }}>
-            <svg className="w-8 h-8" style={{ color: '#84592B' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-            </svg>
+          {/* GDG Logo - Centered, Larger */}
+          <div className="flex justify-center mb-6">
+            <img
+              src={gdgLogo}
+              alt="GDG Logo"
+              className="h-16 w-16 object-contain opacity-90"
+            />
           </div>
-          <h1 className="text-heading mb-3" style={{ color: 'var(--text-primary)' }}>
-            Create your account
+
+          {/* Product Branding */}
+          <h1 className="text-heading mb-2" style={{ color: 'var(--text-primary)' }}>
+            ATS Leaderboard
           </h1>
+          <p className="text-small mb-6" style={{ color: 'var(--text-muted)' }}>
+            GDG on Campus OIST
+          </p>
+
+          {/* Welcome Message */}
           <p className="text-body" style={{ color: 'var(--text-muted)' }}>
             Start tracking your career readiness today
           </p>

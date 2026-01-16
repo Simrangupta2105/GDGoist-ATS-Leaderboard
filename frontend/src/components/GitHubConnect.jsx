@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { useAuth } from '../context/AuthContext'
 
 export default function GitHubConnect() {
   const [profile, setProfile] = useState(null)
@@ -6,6 +7,28 @@ export default function GitHubConnect() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [githubUsername, setGithubUsername] = useState('')
+  const { apiCall } = useAuth()
+
+  // Fetch persisted GitHub status on mount (backend as single source of truth)
+  useEffect(() => {
+    fetchGitHubStatus()
+  }, [])
+
+  const fetchGitHubStatus = async () => {
+    try {
+      const response = await apiCall('/me/github')
+      if (response.ok) {
+        const data = await response.json()
+        if (data.connected && data.github) {
+          // Hydrate state from backend
+          setProfile(data.github.profile)
+          setStats(data.github.stats)
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching GitHub status:', error)
+    }
+  }
 
   const fetchGitHubData = async (username) => {
     try {
@@ -203,13 +226,13 @@ export default function GitHubConnect() {
       <p className="text-gray-600 dark:text-gray-400 mb-6">
         Enter your GitHub username to fetch your real profile data, repositories, and contribution statistics. This will help boost your employability score.
       </p>
-      
+
       {error && (
         <div className="mb-4 p-4 bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 rounded-lg">
           <p className="text-red-700 dark:text-red-200 font-medium">Error: {error}</p>
         </div>
       )}
-      
+
       <div className="mb-4">
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           GitHub Username
@@ -243,7 +266,7 @@ export default function GitHubConnect() {
           </>
         )}
       </button>
-      
+
       <p className="text-xs text-gray-500 dark:text-gray-400 mt-4 text-center">
         We use the public GitHub API. No authentication required.
       </p>

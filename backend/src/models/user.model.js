@@ -12,6 +12,12 @@ const UserSchema = new mongoose.Schema(
       consented: { type: Boolean, default: false },
       timestamp: { type: Date },
     },
+    // Phase 2: GitHub connection state
+    github: {
+      username: { type: String },
+      connected: { type: Boolean, default: false },
+      lastSyncedAt: { type: Date }
+    },
     // Phase 2/3 placeholders (not used in Phase 1)
     githubProfile: { type: String },
     badges: { type: [String] },

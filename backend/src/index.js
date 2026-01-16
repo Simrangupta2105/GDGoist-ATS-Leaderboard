@@ -18,6 +18,27 @@ app.use(cors())
 app.use(express.json())
 app.use(fileUpload())
 
+// ============ ADMIN AUTHORIZATION ============
+/**
+ * Check if email is in admin whitelist
+ * Whitelist configured via ADMIN_EMAILS environment variable
+ * Format: comma-separated list of emails
+ */
+function isAdminEmail(email) {
+  const adminEmails = process.env.ADMIN_EMAILS || ''
+  const whitelist = adminEmails.split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+  return whitelist.includes(email.toLowerCase())
+}
+
+/**
+ * Determine user role based on email whitelist
+ * Returns 'admin' if email is whitelisted, 'student' otherwise
+ */
+function determineUserRole(email) {
+  return isAdminEmail(email) ? 'admin' : 'student'
+}
+// ============================================
+
 // SBERT Semantic Analysis Helper - with improved heuristic fallback
 async function getSemanticSimilarity(resumeText, jobDescription) {
   try {
@@ -25,13 +46,13 @@ async function getSemanticSimilarity(resumeText, jobDescription) {
     const formData = new FormData()
     formData.append('text1', resumeText.substring(0, 2000))
     formData.append('text2', jobDescription.substring(0, 1000))
-    
+
     const response = await fetch('http://localhost:8001/semantic-similarity', {
       method: 'POST',
       body: formData,
       timeout: 5000
     })
-    
+
     if (response.ok) {
       const data = await response.json()
       return data.similarity || 0
@@ -39,7 +60,7 @@ async function getSemanticSimilarity(resumeText, jobDescription) {
   } catch (err) {
     console.log('SBERT service unavailable, using improved heuristic')
   }
-  
+
   // Improved heuristic fallback - semantic-like matching
   return improvedSemanticHeuristic(resumeText, jobDescription)
 }
@@ -47,10 +68,10 @@ async function getSemanticSimilarity(resumeText, jobDescription) {
 // Enhanced Semantic Analysis with NLP techniques
 function improvedSemanticHeuristic(resumeText, jobDescription) {
   if (!jobDescription) return 0
-  
+
   const resume = resumeText.toLowerCase()
   const jd = jobDescription.toLowerCase()
-  
+
   // Extended stopwords list
   const stopwords = new Set([
     'the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'been', 'have', 'has', 'had',
@@ -62,12 +83,12 @@ function improvedSemanticHeuristic(resumeText, jobDescription) {
     'between', 'during', 'through', 'throughout', 'within', 'without', 'above', 'below', 'under', 'over',
     'out', 'off', 'up', 'down', 'here', 'there', 'now', 'then', 'today', 'tomorrow', 'yesterday'
   ])
-  
+
   // Extract and normalize terms
   const extractTerms = (text) => {
     return text.match(/\b\w{3,}\b/g)?.filter(w => !stopwords.has(w)) || []
   }
-  
+
   // Extract n-grams (2-3 word phrases)
   const extractNGrams = (text, n = 2) => {
     const words = text.split(/\s+/).filter(w => w.length > 2)
@@ -77,31 +98,31 @@ function improvedSemanticHeuristic(resumeText, jobDescription) {
     }
     return ngrams
   }
-  
+
   const jdTerms = extractTerms(jd)
   const resumeTerms = extractTerms(resume)
   const jdBigrams = extractNGrams(jd, 2)
   const resumeBigrams = extractNGrams(resume, 2)
   const jdTrigrams = extractNGrams(jd, 3)
   const resumeTrigrams = extractNGrams(resume, 3)
-  
+
   if (jdTerms.length === 0) return 0
-  
+
   // 1. Unigram matching (40% weight)
   const resumeTermSet = new Set(resumeTerms)
   const matchedTerms = jdTerms.filter(term => resumeTermSet.has(term))
   const unigramScore = (matchedTerms.length / jdTerms.length) * 0.4
-  
+
   // 2. Bigram matching (30% weight) - more specific
   const resumeBigramSet = new Set(resumeBigrams)
   const matchedBigrams = jdBigrams.filter(bigram => resumeBigramSet.has(bigram))
   const bigramScore = (matchedBigrams.length / Math.max(1, jdBigrams.length)) * 0.3
-  
+
   // 3. Trigram matching (15% weight) - very specific
   const resumeTrigramSet = new Set(resumeTrigrams)
   const matchedTrigrams = jdTrigrams.filter(trigram => resumeTrigramSet.has(trigram))
   const trigramScore = (matchedTrigrams.length / Math.max(1, jdTrigrams.length)) * 0.15
-  
+
   // 4. Skill keyword matching (15% weight)
   const skillKeywords = [
     'javascript', 'python', 'java', 'c++', 'c#', 'typescript', 'go', 'rust', 'php', 'ruby', 'swift', 'kotlin',
@@ -115,7 +136,7 @@ function improvedSemanticHeuristic(resumeText, jobDescription) {
     'agile', 'scrum', 'kanban', 'jira', 'confluence', 'linux', 'unix', 'windows', 'macos',
     'ci/cd', 'devops', 'testing', 'jest', 'mocha', 'pytest', 'selenium', 'cypress'
   ]
-  
+
   let skillMatches = 0
   for (const skill of skillKeywords) {
     if (jd.includes(skill) && resume.includes(skill)) {
@@ -123,7 +144,7 @@ function improvedSemanticHeuristic(resumeText, jobDescription) {
     }
   }
   const skillScore = (skillMatches / Math.max(1, skillKeywords.length)) * 0.15
-  
+
   // 5. Semantic similarity bonus - check for related terms
   const semanticRelations = {
     'developer': ['engineer', 'programmer', 'coder', 'architect'],
@@ -137,7 +158,7 @@ function improvedSemanticHeuristic(resumeText, jobDescription) {
     'management': ['leadership', 'team lead', 'scrum master'],
     'design': ['ux', 'ui', 'figma', 'sketch']
   }
-  
+
   let semanticBonus = 0
   for (const [key, values] of Object.entries(semanticRelations)) {
     if (jd.includes(key)) {
@@ -148,7 +169,7 @@ function improvedSemanticHeuristic(resumeText, jobDescription) {
       }
     }
   }
-  
+
   // 6. Experience level matching
   let experienceBonus = 0
   const experienceLevels = {
@@ -157,7 +178,7 @@ function improvedSemanticHeuristic(resumeText, jobDescription) {
     'senior': ['lead', 'principal', '10+ years', 'expert', 'architect'],
     'intern': ['internship', 'student', 'trainee']
   }
-  
+
   for (const [level, keywords] of Object.entries(experienceLevels)) {
     if (jd.includes(level)) {
       for (const keyword of keywords) {
@@ -167,7 +188,7 @@ function improvedSemanticHeuristic(resumeText, jobDescription) {
       }
     }
   }
-  
+
   // Calculate final score
   const finalScore = Math.min(1.0, unigramScore + bigramScore + trigramScore + skillScore + semanticBonus + experienceBonus)
   return Math.max(0, finalScore)
@@ -197,9 +218,15 @@ app.post('/auth/register', async (req, res) => {
     const existing = await User.findOne({ email })
     if (existing) return res.status(409).json({ error: 'User already exists' })
 
+    // Determine role based on admin whitelist
+    const role = determineUserRole(email)
+
     const passwordHash = await bcrypt.hash(password, 10)
-    const user = await User.create({ name, email, passwordHash, role: 'student' })
+    const user = await User.create({ name, email, passwordHash, role })
     const token = generateToken(user)
+
+    console.log(`[Auth] User registered: ${email} with role: ${role}`)
+
     return res.status(201).json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } })
   } catch (err) {
     console.error(err)
@@ -216,6 +243,15 @@ app.post('/auth/login', async (req, res) => {
     if (!user || !user.passwordHash) return res.status(401).json({ error: 'Invalid credentials' })
     const ok = await bcrypt.compare(password, user.passwordHash)
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' })
+
+    // Check if role needs to be updated based on current whitelist
+    const expectedRole = determineUserRole(email)
+    if (user.role !== expectedRole) {
+      console.log(`[Auth] Updating role for ${email}: ${user.role} -> ${expectedRole}`)
+      user.role = expectedRole
+      await user.save()
+    }
+
     const token = generateToken(user)
     return res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } })
   } catch (err) {
@@ -224,7 +260,60 @@ app.post('/auth/login', async (req, res) => {
   }
 })
 
-// Consent endpoint (Phase 1 placeholder) - protected
+// ============ PASSWORD RESET (DEV/ADMIN SETUP) ============
+/**
+ * Password reset endpoint for admin setup and recovery
+ * WARNING: This is a temporary endpoint for initial admin setup
+ * In production, implement proper password reset flow with email verification
+ * 
+ * Usage:
+ * POST /auth/reset-password
+ * Body: { email, newPassword }
+ */
+app.post('/auth/reset-password', async (req, res) => {
+  try {
+    const { email, newPassword } = req.body
+
+    // Validation
+    if (!email || !newPassword) {
+      return res.status(400).json({ error: 'email and newPassword are required' })
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' })
+    }
+
+    // Find user
+    const user = await User.findOne({ email })
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+
+    // Hash new password using same logic as registration
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+
+    // Update password
+    user.passwordHash = passwordHash
+    await user.save()
+
+    console.log(`[Auth] Password reset successful for: ${email} (role: ${user.role})`)
+
+    return res.json({
+      message: 'Password reset successful',
+      user: {
+        email: user.email,
+        role: user.role,
+        name: user.name
+      }
+    })
+  } catch (err) {
+    console.error('[Auth] Password reset error:', err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+// ========================================================
+
+// Consent endpoint - protected (Phase 3: Now tracks consent history)
 app.post('/consent', verifyToken, async (req, res) => {
   try {
     const { consented } = req.body
@@ -233,7 +322,40 @@ app.post('/consent', verifyToken, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' })
     user.dpdpConsent = { consented: !!consented, timestamp: new Date() }
     await user.save()
+
+    // Phase 3: Record consent event in history (will be imported later)
+    try {
+      await recordConsentEvent(req.user.id, consented)
+    } catch (historyErr) {
+      console.error('Consent history recording error:', historyErr)
+      // Don't fail the request if history recording fails
+    }
+
     return res.json({ message: 'Consent recorded', dpdpConsent: user.dpdpConsent })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Get current user profile (for auth state hydration)
+app.get('/me', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-passwordHash')
+    if (!user) return res.status(404).json({ error: 'User not found' })
+    return res.json({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        department: user.department,
+        graduationYear: user.graduationYear,
+        dpdpConsent: user.dpdpConsent,
+        githubProfile: user.githubProfile,
+        github: user.github
+      }
+    })
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Server error' })
@@ -249,6 +371,29 @@ const Connection = require('./models/connection.model')
 const SkillGap = require('./models/skillgap.model')
 const { getAuthorizationUrl, getAccessToken, syncGitHubData } = require('./github')
 const { checkAndAwardBadges, getUserBadges, calculateBadgeScore } = require('./badges')
+
+// PHASE 2: Centralized Services
+const { recalculateUserScore, getScoreBreakdown } = require('./scoreService')
+const { startScheduler: startGitHubScheduler, triggerUserSync } = require('./githubScheduler')
+
+// PHASE 3: Admin Intelligence & Privacy
+const {
+  getCohortAnalytics,
+  getSkillIntelligence,
+  getAtRiskCohorts,
+  getTrendAnalysis,
+  getPlatformStats
+} = require('./adminAnalytics')
+const {
+  executeRightToErasure,
+  recordConsentEvent,
+  getConsentHistory,
+  createAuditLog,
+  getAuditLogs,
+  exportUserData
+} = require('./privacyService')
+const { withCache } = require('./analyticsCache')
+const { generalLimiter, authLimiter, adminLimiter, uploadLimiter } = require('./middleware/rateLimit')
 
 // Generate a pre-signed upload URL for a resume (PUT). Returns resume metadata record and upload URL.
 app.post('/resumes/upload-url', verifyToken, requireConsent, async (req, res) => {
@@ -344,46 +489,6 @@ app.post('/resumes/ats-result', async (req, res) => {
   }
 })
 
-async function recalculateUserScore(userId) {
-  // Phase 2: Include GitHub score and Badge score
-  // Use the most recently scored resume for atsComponent (if any)
-  const latest = await Resume.findOne({ user: userId, status: 'scored' }).sort({ uploadedAt: -1, updatedAt: -1 })
-  let atsComponent = 0
-  if (latest && typeof latest.atsScore === 'number') {
-    atsComponent = latest.atsScore
-  }
-
-  // Get GitHub score
-  let gitComponent = 0
-  const githubData = await GitHub.findOne({ user: userId })
-  if (githubData && githubData.stats) {
-    const { totalCommits, totalPullRequests, totalStars } = githubData.stats
-    const commitScore = Math.min(40, (totalCommits / 100) * 40)
-    const prScore = Math.min(30, (totalPullRequests / 50) * 30)
-    const starScore = Math.min(20, (totalStars / 500) * 20)
-    const langScore = Math.min(10, (githubData.stats.languages.length / 5) * 10)
-    gitComponent = Math.round(commitScore + prScore + starScore + langScore)
-  }
-
-  // Get badge score
-  let badgeComponent = 0
-  const badges = await Badge.find({ user: userId })
-  badgeComponent = calculateBadgeScore(badges.length)
-
-  const totalScore = Number((0.5 * atsComponent + 0.3 * gitComponent + 0.2 * badgeComponent).toFixed(2))
-
-  let scoreDoc = await Score.findOne({ user: userId })
-  if (!scoreDoc) {
-    scoreDoc = await Score.create({ user: userId, totalScore, atsComponent, gitComponent, badgeComponent })
-  } else {
-    scoreDoc.totalScore = totalScore
-    scoreDoc.atsComponent = atsComponent
-    scoreDoc.gitComponent = gitComponent
-    scoreDoc.badgeComponent = badgeComponent
-    await scoreDoc.save()
-  }
-  return scoreDoc
-}
 
 const crypto = require('crypto')
 
@@ -674,9 +779,14 @@ app.post('/github/callback', verifyToken, async (req, res) => {
       await githubDoc.save()
     }
 
-    // Update user GitHub profile
+    // Update user GitHub profile AND connection state (CRITICAL for sync job)
     const user = await User.findById(req.user.id)
     user.githubProfile = syncResult.profile.name
+    user.github = {
+      username: syncResult.profile.login || syncResult.profile.name,
+      connected: true,
+      lastSyncedAt: new Date()
+    }
     await user.save()
 
     // Check and award badges
@@ -1031,7 +1141,7 @@ app.post('/resumes/parse', verifyToken, async (req, res) => {
 
     const detectedSkills = []
     const skillsByCategory = {}
-    
+
     for (const [category, skills] of Object.entries(skillCategories)) {
       skillsByCategory[category] = []
       skills.forEach(skill => {
@@ -1083,7 +1193,7 @@ app.post('/resumes/parse', verifyToken, async (req, res) => {
     // Calculate relevance using improved semantic heuristic
     let relevanceScore = 0
     let usedSBERT = false
-    
+
     if (jobDescription) {
       // Use improved semantic heuristic
       const semanticScore = await getSemanticSimilarity(fileContent, jobDescription)
@@ -1164,7 +1274,7 @@ app.post('/resumes/parse', verifyToken, async (req, res) => {
 
     // Extract contact info
     const emailMatch = fileContent.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i)
-    
+
     // Phone extraction - multiple patterns
     let phoneMatch = null
     const phonePatterns = [
@@ -1173,13 +1283,35 @@ app.post('/resumes/parse', verifyToken, async (req, res) => {
       /\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}/,
       /[0-9]{10,}/
     ]
-    
+
     for (const pattern of phonePatterns) {
       const match = fileContent.match(pattern)
       if (match) {
         phoneMatch = match[0].trim()
         break
       }
+    }
+
+    // CRITICAL FIX: Save resume to database and recalculate score
+    try {
+      // Save resume with ATS score
+      await Resume.create({
+        user: req.user.id,
+        filename: file.name,
+        s3Key: `temp/${file.name}`, // Placeholder
+        status: 'scored',
+        atsScore: finalScore,
+        parsedSkills: detectedSkills,
+        uploadedAt: new Date()
+      })
+
+      // Recalculate composite employability score
+      await recalculateUserScore(req.user.id)
+
+      console.log(`[Score] Resume saved and score recalculated for user ${req.user.id}`)
+    } catch (saveErr) {
+      console.error('Error saving resume or recalculating score:', saveErr)
+      // Don't fail the request, but log the error
     }
 
     return res.json({
@@ -1223,5 +1355,308 @@ app.post('/resumes/parse', verifyToken, async (req, res) => {
   }
 })
 
+// ============ PHASE 2: Additional Endpoints ============
+
+// Get score breakdown for current user
+app.get('/score/breakdown', verifyToken, async (req, res) => {
+  try {
+    const breakdown = await getScoreBreakdown(req.user.id)
+    return res.json(breakdown)
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Get user's resume status (for state hydration)
+app.get('/me/resume', verifyToken, async (req, res) => {
+  try {
+    const latestResume = await Resume.findOne({ user: req.user.id })
+      .sort({ uploadedAt: -1 })
+      .select('filename status atsScore parsedSkills uploadedAt')
+
+    if (!latestResume) {
+      return res.json({ hasResume: false })
+    }
+
+    return res.json({
+      hasResume: true,
+      resume: {
+        filename: latestResume.filename,
+        status: latestResume.status,
+        atsScore: latestResume.atsScore,
+        parsedSkills: latestResume.parsedSkills,
+        uploadedAt: latestResume.uploadedAt
+      }
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Get user's GitHub connection status (for state hydration)
+app.get('/me/github', verifyToken, async (req, res) => {
+  try {
+    const githubData = await GitHub.findOne({ user: req.user.id })
+
+    if (!githubData) {
+      return res.json({ connected: false })
+    }
+
+    return res.json({
+      connected: true,
+      github: {
+        username: githubData.githubUsername,
+        profile: githubData.profile,
+        stats: githubData.stats,
+        lastSyncedAt: githubData.lastSyncedAt
+      }
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Manually trigger GitHub sync for current user
+app.post('/github/sync', verifyToken, async (req, res) => {
+  try {
+    const result = await triggerUserSync(req.user.id)
+    if (result.skipped) {
+      return res.json({
+        message: 'Sync skipped - too recent',
+        reason: result.reason
+      })
+    }
+    if (result.success) {
+      return res.json({
+        message: 'GitHub data synced successfully',
+        stats: result.stats
+      })
+    }
+    return res.status(500).json({ error: result.error })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+// Get badge progress for current user
+app.get('/badges/progress', verifyToken, async (req, res) => {
+  try {
+    const { getBadgeProgress } = require('./badges')
+    const progress = await getBadgeProgress(req.user.id)
+    return res.json({ progress })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// ============ PHASE 3: Admin Intelligence & Privacy APIs ============
+
+// Apply rate limiting to admin routes
+app.use('/admin', adminLimiter)
+
+// Get cohort analytics (aggregated, NO PII)
+app.get('/admin/analytics/cohorts', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { department, graduationYear } = req.query
+
+    const analytics = await withCache('getCohortAnalytics', { department, graduationYear }, async () => {
+      return await getCohortAnalytics({ department, graduationYear })
+    })
+
+    // Log admin access
+    await createAuditLog('ADMIN_VIEW_COHORT_ANALYTICS', req.user.id, { department, graduationYear })
+
+    return res.json({ cohorts: analytics })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Get skill intelligence (aggregated, NO PII)
+app.get('/admin/analytics/skills', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { department, graduationYear } = req.query
+
+    const skills = await withCache('getSkillIntelligence', { department, graduationYear }, async () => {
+      return await getSkillIntelligence({ department, graduationYear })
+    })
+
+    await createAuditLog('ADMIN_VIEW_SKILL_INTELLIGENCE', req.user.id, { department, graduationYear })
+
+    return res.json(skills)
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Get at-risk cohorts (aggregated, NO PII)
+app.get('/admin/analytics/at-risk', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const atRisk = await withCache('getAtRiskCohorts', {}, async () => {
+      return await getAtRiskCohorts()
+    })
+
+    await createAuditLog('ADMIN_VIEW_AT_RISK_COHORTS', req.user.id)
+
+    return res.json({ atRiskCohorts: atRisk })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Get trend analysis (aggregated, NO PII)
+app.get('/admin/analytics/trends', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { department, graduationYear, months } = req.query
+
+    const trends = await withCache('getTrendAnalysis', { department, graduationYear, months }, async () => {
+      return await getTrendAnalysis({ department, graduationYear, months: months ? Number(months) : 6 })
+    })
+
+    await createAuditLog('ADMIN_VIEW_TRENDS', req.user.id, { department, graduationYear, months })
+
+    return res.json({ trends })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Get platform statistics (aggregated, NO PII)
+app.get('/admin/analytics/platform', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const stats = await withCache('getPlatformStats', {}, async () => {
+      return await getPlatformStats()
+    })
+
+    await createAuditLog('ADMIN_VIEW_PLATFORM_STATS', req.user.id)
+
+    return res.json(stats)
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// ============ PHASE 3: Privacy Compliance APIs ============
+
+// Right to Erasure (hard delete user data)
+app.delete('/admin/privacy/erase/:userId', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { userId } = req.params
+
+    const result = await executeRightToErasure(userId, req.user.id)
+
+    return res.json(result)
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+// Get consent history for a user
+app.get('/admin/privacy/consent/:userId', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { userId } = req.params
+
+    const history = await getConsentHistory(userId)
+
+    await createAuditLog('ADMIN_VIEW_CONSENT_HISTORY', req.user.id, { targetUser: userId })
+
+    return res.json({ consentHistory: history })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Export user data (for portability)
+app.get('/admin/privacy/export/:userId', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { userId } = req.params
+
+    const data = await exportUserData(userId)
+
+    await createAuditLog('ADMIN_EXPORT_USER_DATA', req.user.id, { targetUser: userId })
+
+    return res.json(data)
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Get audit logs
+app.get('/admin/audit-logs', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { action, performedBy, startDate, endDate, limit } = req.query
+
+    const logs = await getAuditLogs(
+      { action, performedBy, startDate, endDate },
+      limit ? Number(limit) : 100
+    )
+
+    return res.json({ logs })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// User-facing: Request data export (self-service)
+app.get('/me/export', verifyToken, async (req, res) => {
+  try {
+    const data = await exportUserData(req.user.id)
+
+    return res.json(data)
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// User-facing: Request data deletion (self-service)
+app.delete('/me/delete-account', verifyToken, async (req, res) => {
+  try {
+    const result = await executeRightToErasure(req.user.id, req.user.id)
+
+    return res.json(result)
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: err.message })
+  }
+})
+
 const port = process.env.PORT || 4000
-app.listen(port, () => console.log(`Backend listening on ${port}`))
+
+// Start server and initialize Phase 2 & 3 services
+app.listen(port, () => {
+  console.log(`Backend listening on ${port}`)
+  console.log('='.repeat(50))
+  console.log('PHASE 2 SERVICES INITIALIZED')
+  console.log('='.repeat(50))
+
+  // Start GitHub sync scheduler
+  startGitHubScheduler()
+  console.log('✓ GitHub sync scheduler started')
+  console.log('✓ Score aggregation service ready')
+  console.log('✓ Badge evaluation system ready')
+  console.log('='.repeat(50))
+
+  console.log('PHASE 3 SERVICES INITIALIZED')
+  console.log('='.repeat(50))
+  console.log('✓ Admin analytics endpoints ready')
+  console.log('✓ Privacy compliance APIs ready')
+  console.log('✓ Rate limiting active')
+  console.log('✓ Analytics caching enabled (5min TTL)')
+  console.log('✓ Audit logging active')
+  console.log('='.repeat(50))
+})

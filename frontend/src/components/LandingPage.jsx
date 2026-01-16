@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import GDGLogo from './GDGLogo'
+import gdgLogo from '../assets/gdg-logo.png'
 
 export default function LandingPage() {
   return (
@@ -9,7 +9,28 @@ export default function LandingPage() {
       <header className="border-b" style={{ borderColor: 'var(--border-color)' }}>
         <div className="container-premium py-4">
           <div className="flex justify-between items-center">
-            <GDGLogo size="md" showText={true} variant="full" />
+            {/* GDG Logo - Static Image */}
+            <div className="flex items-center gap-3">
+              <img
+                src={gdgLogo}
+                alt="GDG Logo"
+                className="h-8 w-8 object-contain flex-shrink-0 opacity-75"
+              />
+              <div className="flex flex-col leading-tight">
+                <span
+                  className="text-base font-semibold tracking-tight"
+                  style={{ color: 'var(--text-primary)' }}
+                >
+                  ATS Leaderboard
+                </span>
+                <span
+                  className="text-xs font-normal"
+                  style={{ color: 'var(--text-muted)', opacity: 0.65 }}
+                >
+                  GDG on Campus OIST
+                </span>
+              </div>
+            </div>
             <div className="flex items-center gap-4">
               <Link
                 to="/login"

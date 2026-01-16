@@ -33,7 +33,7 @@ export const AuthProvider = ({ children }) => {
           'Content-Type': 'application/json'
         }
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         setUser(data.user)
@@ -59,12 +59,12 @@ export const AuthProvider = ({ children }) => {
       })
 
       const data = await response.json()
-      
+
       if (response.ok) {
         localStorage.setItem('token', data.token)
         setToken(data.token)
         setUser(data.user)
-        return { success: true }
+        return { success: true, user: data.user }  // Return user for role checking
       } else {
         return { success: false, error: data.error }
       }
@@ -84,7 +84,7 @@ export const AuthProvider = ({ children }) => {
       })
 
       const data = await response.json()
-      
+
       if (response.ok) {
         localStorage.setItem('token', data.token)
         setToken(data.token)
@@ -107,7 +107,7 @@ export const AuthProvider = ({ children }) => {
   const apiCall = async (endpoint, options = {}) => {
     console.log('Making API call to:', `${API_BASE}${endpoint}`)
     console.log('With options:', options)
-    
+
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
@@ -117,7 +117,7 @@ export const AuthProvider = ({ children }) => {
           ...options.headers
         }
       })
-      
+
       console.log('API response status:', response.status)
       return response
     } catch (error) {
