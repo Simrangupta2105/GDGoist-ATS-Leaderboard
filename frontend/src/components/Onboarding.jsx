@@ -48,16 +48,24 @@ export default function Onboarding() {
   }
 
   const departments = [
-    'Computer Science',
-    'Information Technology',
-    'Software Engineering',
-    'Data Science',
-    'Electrical Engineering',
-    'Mechanical Engineering',
-    'Civil Engineering',
-    'Business Administration',
-    'Marketing',
-    'Finance',
+    // Undergraduate Programs
+    'Computer Science & Engineering (CSE)',
+    'CSE - AI & Machine Learning',
+    'CSE - Data Science',
+    'CSE - Computer Science & Business Systems',
+    'Information Technology (IT)',
+    'Electronics & Communication Engineering (ECE)',
+    'Electrical & Electronics Engineering (EEE)',
+    'Mechanical Engineering (ME)',
+    'Civil Engineering (CE)',
+    'Basic Science Engineering (BSE)',
+    // Postgraduate Programs
+    'Master of Computer Applications (MCA)',
+    'M.Tech - Machine Design',
+    'M.Tech - Power Systems',
+    'M.Tech - Construction Technology & Management',
+    'M.Tech - Digital Communications',
+    'M.Tech - CSE (AI & ML)',
     'Other'
   ]
 
@@ -65,32 +73,64 @@ export default function Onboarding() {
   const years = Array.from({ length: 10 }, (_, i) => currentYear + i)
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900 py-12 px-4 sm:px-6 lg:px-8">
+    <div
+      className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8"
+      style={{ backgroundColor: 'var(--bg-app)' }}
+    >
       <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
+        <div className="text-center">
+          <div
+            className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center"
+            style={{ backgroundColor: 'var(--accent-primary)' }}
+          >
+            <span className="text-2xl">👤</span>
+          </div>
+          <h2 style={{ color: 'var(--text-primary)', fontSize: '1.875rem', fontWeight: 800 }}>
             Complete Your Profile
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600 dark:text-slate-400">
+          <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>
             Tell us about your academic background
           </p>
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+
+        <form
+          className="mt-8 space-y-6 card p-6"
+          onSubmit={handleSubmit}
+        >
           {error && (
-            <div className="bg-red-50 dark:bg-slate-800 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 px-4 py-3 rounded">
+            <div
+              className="px-4 py-3"
+              style={{
+                backgroundColor: 'var(--danger-bg)',
+                border: '1px solid var(--accent-danger)',
+                borderRadius: 'var(--radius-lg)',
+                color: 'var(--accent-danger)'
+              }}
+            >
               {error}
             </div>
           )}
+
           <div className="space-y-4">
             <div>
-              <label htmlFor="department" className="block text-sm font-medium text-gray-700 dark:text-slate-300">
+              <label
+                htmlFor="department"
+                style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.5rem' }}
+              >
                 Department
               </label>
               <select
                 id="department"
                 name="department"
                 required
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                className="block w-full px-4 py-3"
+                style={{
+                  backgroundColor: 'var(--bg-card-soft)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-lg)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.875rem'
+                }}
                 value={department}
                 onChange={(e) => setDepartment(e.target.value)}
               >
@@ -102,15 +142,26 @@ export default function Onboarding() {
                 ))}
               </select>
             </div>
+
             <div>
-              <label htmlFor="graduationYear" className="block text-sm font-medium text-gray-700 dark:text-slate-300">
+              <label
+                htmlFor="graduationYear"
+                style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.5rem' }}
+              >
                 Expected Graduation Year
               </label>
               <select
                 id="graduationYear"
                 name="graduationYear"
                 required
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                className="block w-full px-4 py-3"
+                style={{
+                  backgroundColor: 'var(--bg-card-soft)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-lg)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.875rem'
+                }}
                 value={graduationYear}
                 onChange={(e) => setGraduationYear(e.target.value)}
               >
@@ -128,7 +179,14 @@ export default function Onboarding() {
             <button
               type="submit"
               disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-slate-900 disabled:opacity-50"
+              className="w-full py-3 px-4 font-semibold"
+              style={{
+                backgroundColor: loading ? 'var(--border-subtle)' : 'var(--accent-primary)',
+                color: 'white',
+                borderRadius: 'var(--radius-lg)',
+                opacity: loading ? 0.5 : 1,
+                cursor: loading ? 'not-allowed' : 'pointer'
+              }}
             >
               {loading ? 'Saving...' : 'Complete Profile'}
             </button>

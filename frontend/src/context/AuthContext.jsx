@@ -109,13 +109,18 @@ export const AuthProvider = ({ children }) => {
     console.log('With options:', options)
 
     try {
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        ...options.headers
+      }
+
+      if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json'
+      }
+
       const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...options.headers
-        }
+        headers
       })
 
       console.log('API response status:', response.status)

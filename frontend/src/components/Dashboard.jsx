@@ -146,7 +146,7 @@ export default function Dashboard() {
   const insight = getAIInsight()
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
+    <div className="min-h-screen page-transition" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <div className="container-premium py-10">
         {/* Header */}
         <header className="mb-10 animate-fadeUp">
@@ -321,12 +321,25 @@ export default function Dashboard() {
             <div className="space-y-6">
               {/* Profile Card */}
               <div className="card-premium">
-                <h3
-                  className="text-subheading mb-4"
-                  style={{ color: 'var(--text-primary)' }}
-                >
-                  Profile
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3
+                    className="text-subheading"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    Profile
+                  </h3>
+                  <button
+                    onClick={() => navigate('/profile/edit')}
+                    className="px-4 py-2 text-sm font-medium"
+                    style={{
+                      backgroundColor: 'var(--accent-primary)',
+                      color: 'white',
+                      borderRadius: 'var(--radius-lg)'
+                    }}
+                  >
+                    Edit Profile
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                   <div>
                     <dt
