@@ -14,6 +14,10 @@ const ResumeSchema = new mongoose.Schema(
     fileKey: { type: String },
     status: { type: String, enum: ['pending', 'uploaded', 'processing', 'scored'], default: 'pending' },
     uploadedAt: { type: Date },
+    // ATS results
+    feedback: { type: [String], default: [] },
+    breakdown: { type: Object, default: {} },
+    analysisData: { type: Object },
     // Phase 2/3 placeholders
     sourceFileKey: { type: String },
   },

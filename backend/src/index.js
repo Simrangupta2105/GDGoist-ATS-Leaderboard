@@ -2,7 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const fileUpload = require('express-fileupload')
-const fetch = require('node-fetch')
+const axios = require('axios')
 const FormData = require('form-data')
 const path = require('path')
 const fs = require('fs')
@@ -428,6 +428,35 @@ app.put('/me/profile', verifyToken, async (req, res) => {
   }
 })
 
+// File proxy endpoint to serve S3 objects through backend (handles private bucket)
+app.get('/files/:key(*)', async (req, res) => {
+  try {
+    const key = req.params.key
+    if (!key) return res.status(400).send('Key is required')
+
+    console.log(`[Proxy] Fetching file: ${key}`)
+    const buffer = await getFile(key)
+
+    const ext = path.extname(key).toLowerCase()
+    const mimeTypes = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.pdf': 'application/pdf',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    }
+    const contentType = mimeTypes[ext] || 'application/octet-stream'
+
+    res.set('Content-Type', contentType)
+    res.send(buffer)
+  } catch (err) {
+    console.error(`[Proxy] Error: ${err.message}`)
+    res.status(404).send('File not found')
+  }
+})
+
 // Upload profile picture
 app.post('/me/avatar', verifyToken, async (req, res) => {
   try {
@@ -446,9 +475,16 @@ app.post('/me/avatar', verifyToken, async (req, res) => {
     try {
       // Try S3 upload
       const s3Key = `avatars/${filename}`
-      fileUrl = await uploadFile(file.data, s3Key, file.mimetype)
+      await uploadFile(file.data, s3Key, file.mimetype)
+
+      // Use our proxy URL instead of direct S3 URL
+      const host = req.get('host')
+      const protocol = req.protocol
+      fileUrl = `${protocol}://${host}/files/${s3Key}`
+
+      console.log(`[Avatar] Uploaded to S3 and using proxy URL: ${fileUrl}`)
     } catch (s3Err) {
-      console.log('S3 Upload failed, falling back to local:', s3Err.message)
+      console.log('[Avatar] S3 Upload failed, falling back to local:', s3Err.message)
 
       // Ensure uploads directory exists
       if (!fs.existsSync(uploadDir)) {
@@ -458,7 +494,6 @@ app.post('/me/avatar', verifyToken, async (req, res) => {
       const uploadPath = path.join(uploadDir, filename)
       await file.mv(uploadPath)
 
-      // Build URL (assuming backend is serving static files from /uploads)
       const protocol = req.protocol
       const host = req.get('host')
       fileUrl = `${protocol}://${host}/uploads/${filename}`
@@ -540,7 +575,7 @@ app.get('/users/:userId/profile', async (req, res) => {
   }
 })
 
-const { generateUploadUrl, uploadFile } = require('./s3')
+const { generateUploadUrl, uploadFile, getFile } = require('./s3')
 const Score = require('./models/score.model')
 const GitHub = require('./models/github.model')
 const Connection = require('./models/connection.model')
@@ -572,6 +607,54 @@ const { withCache } = require('./analyticsCache')
 const { generalLimiter, authLimiter, adminLimiter, uploadLimiter } = require('./middleware/rateLimit')
 
 // Generate a pre-signed upload URL for a resume (PUT). Returns resume metadata record and upload URL.
+app.post('/resumes/upload', verifyToken, requireConsent, async (req, res) => {
+  try {
+    if (!req.files || !req.files.resume) {
+      return res.status(400).json({ error: 'No resume file uploaded' })
+    }
+
+    const file = req.files.resume
+    const userId = req.user.id
+
+    // Validation
+    const allowed = ['.pdf', '.docx']
+    const ext = path.extname(file.name).toLowerCase()
+    if (!allowed.includes(ext)) {
+      return res.status(400).json({ error: 'Only PDF and DOCX files are allowed' })
+    }
+
+    // Generate Key
+    const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now())
+    const key = `resumes/${userId}/${uuid}${ext}`
+
+    // Upload to S3
+    const s3Url = await uploadFile(file.data, key, file.mimetype)
+
+    // Create Resume Record
+    const resume = await Resume.create({
+      user: userId,
+      originalFilename: file.name,
+      contentType: file.mimetype,
+      size: file.size,
+      fileKey: key,
+      status: 'uploaded',
+      uploadedAt: new Date()
+    })
+
+    return res.json({
+      success: true,
+      resume: {
+        id: resume._id,
+        status: resume.status,
+        url: s3Url
+      }
+    })
+  } catch (err) {
+    console.error('Resume upload error:', err)
+    return res.status(500).json({ error: 'Upload failed' })
+  }
+})
+
 app.post('/resumes/upload-url', verifyToken, requireConsent, async (req, res) => {
   try {
     const { filename, contentType, size } = req.body
@@ -1337,280 +1420,76 @@ app.get('/skillgap/peers', verifyToken, async (req, res) => {
 // ============ RESUME PARSING & ATS ANALYSIS ============
 
 // Resume parse endpoint - analyzes resume with improved heuristic analysis
+// Parse resume - proxies to Python ATS Service
 app.post('/resumes/parse', verifyToken, async (req, res) => {
   try {
-    const file = req.files?.file
-    const jobDescription = req.body.job_description || ''
+    const { resumeId, job_description } = req.body
 
-    if (!file) {
-      return res.status(400).json({ error: 'No file provided' })
-    }
+    // Scenario 1: Resume ID provided (From S3 Upload flow)
+    if (resumeId) {
+      const resume = await Resume.findById(resumeId)
+      if (!resume) return res.status(404).json({ error: 'Resume not found' })
 
-    // Read file content
-    const fileContent = file.data.toString('utf8')
+      // Get file from S3
+      let fileBuffer
+      try {
+        fileBuffer = await getFile(resume.fileKey)
+      } catch (err) {
+        console.error('Failed to get file from S3:', err)
+        return res.status(500).json({ error: 'Failed to retrieve resume file' })
+      }
 
-    // Comprehensive skill detection
-    const skillCategories = {
-      'Languages': [
-        'JavaScript', 'Python', 'Java', 'C++', 'C#', 'Go', 'Rust', 'TypeScript', 'PHP', 'Ruby', 'Swift', 'Kotlin', 'R', 'MATLAB', 'Perl', 'Scala', 'Groovy', 'Dart', 'Elixir', 'Clojure', 'Haskell', 'Lua', 'Objective-C', 'VB.NET'
-      ],
-      'Frontend': [
-        'React', 'Vue', 'Angular', 'Svelte', 'Next.js', 'Nuxt', 'Ember', 'Backbone', 'jQuery', 'Bootstrap', 'Tailwind', 'Material UI', 'Webpack', 'Vite', 'Parcel', 'Gulp', 'Grunt', 'LESS', 'SCSS', 'Sass'
-      ],
-      'Backend': [
-        'Node.js', 'Express', 'Django', 'Flask', 'FastAPI', 'Spring', 'Spring Boot', 'Laravel', 'Rails', 'ASP.NET', 'Fastify', 'Nest.js', 'Gin', 'Echo', 'Fiber', 'Koa', 'Hapi', 'Sails.js'
-      ],
-      'Databases': [
-        'MongoDB', 'PostgreSQL', 'MySQL', 'Redis', 'Elasticsearch', 'Firebase', 'DynamoDB', 'Cassandra', 'Oracle', 'SQL Server', 'MariaDB', 'CouchDB', 'Neo4j', 'Memcached', 'RabbitMQ'
-      ],
-      'Cloud & DevOps': [
-        'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'Git', 'GitHub', 'GitLab', 'Jenkins', 'CircleCI', 'Travis CI', 'Terraform', 'Ansible', 'CloudFormation', 'Heroku', 'DigitalOcean', 'Netlify', 'Vercel'
-      ],
-      'APIs & Protocols': [
-        'REST API', 'GraphQL', 'gRPC', 'SOAP', 'WebSocket', 'OAuth', 'JWT', 'HTTP/2', 'HTTPS', 'XML', 'JSON', 'YAML'
-      ],
-      'Data & ML': [
-        'Machine Learning', 'Data Science', 'TensorFlow', 'PyTorch', 'Scikit-learn', 'Pandas', 'NumPy', 'Keras', 'OpenCV', 'NLP', 'Deep Learning', 'Computer Vision', 'Jupyter', 'Anaconda'
-      ],
-      'Testing': [
-        'Jest', 'Mocha', 'Pytest', 'JUnit', 'Selenium', 'Cypress', 'Testing Library', 'RSpec', 'Jasmine', 'Vitest', 'Playwright'
-      ],
-      'Other': [
-        'Agile', 'Scrum', 'Linux', 'Unix', 'Windows', 'macOS', 'HTML', 'CSS', 'SQL', 'NoSQL', 'Microservices', 'Serverless', 'Design Patterns'
-      ]
-    }
+      // Prepare form data for Python ATS
+      const formData = new FormData()
+      formData.append('file', fileBuffer, {
+        filename: resume.originalFilename,
+        contentType: resume.contentType
+      })
+      if (job_description) formData.append('job_description', job_description)
 
-    const detectedSkills = []
-    const skillsByCategory = {}
+      // Call ATS Service
+      const atsUrl = process.env.ATS_SERVICE_URL || 'http://localhost:8000'
+      console.log(`[ATS] Requesting analysis from ${atsUrl}/parse for resume ${resumeId}`)
 
-    for (const [category, skills] of Object.entries(skillCategories)) {
-      skillsByCategory[category] = []
-      skills.forEach(skill => {
-        const regex = new RegExp(`\\b${skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi')
-        if (regex.test(fileContent)) {
-          if (!detectedSkills.includes(skill)) {
-            detectedSkills.push(skill)
-            skillsByCategory[category].push(skill)
-          }
+      const response = await axios.post(`${atsUrl}/parse`, formData, {
+        headers: {
+          ...formData.getHeaders()
         }
       })
-    }
 
-    // Remove empty categories
-    Object.keys(skillsByCategory).forEach(key => {
-      if (skillsByCategory[key].length === 0) delete skillsByCategory[key]
-    })
+      const result = response.data
 
-    // Section detection
-    const educationMatch = fileContent.match(/(?:education|academic|degree|university|college|school|b\.?s\.?|b\.?a\.?|m\.?s\.?|m\.?a\.?|phd|bachelor|master)[\s\S]{0,800}?(?=\n\n|\n(?:[A-Z][a-z]+|[A-Z]{2,})|$)/i)
-    const experienceMatch = fileContent.match(/(?:experience|employment|work|professional|job|position|career)[\s\S]{0,1500}?(?=\n\n|\n(?:[A-Z][a-z]+|[A-Z]{2,})|$)/i)
-    const skillsMatch = fileContent.match(/(?:skills|technical skills|competencies|expertise|technologies|tools)[\s\S]{0,800}?(?=\n\n|\n(?:[A-Z][a-z]+|[A-Z]{2,})|$)/i)
-    const projectsMatch = fileContent.match(/(?:projects?|portfolio|work samples|case studies|achievements)[\s\S]{0,800}?(?=\n\n|\n(?:[A-Z][a-z]+|[A-Z]{2,})|$)/i)
-    const certMatch = fileContent.match(/(?:certifications?|licenses?|awards?|achievements?|publications?)[\s\S]{0,500}?(?=\n\n|\n(?:[A-Z][a-z]+|[A-Z]{2,})|$)/i)
+      // Update Resume Record
+      resume.atsScore = result.atsScore
+      resume.parsedSkills = result.parsedSkills || []
+      resume.parsingErrors = result.parsingErrors || []
+      resume.status = 'scored'
+      resume.analysisData = result
+      if (result.feedback) resume.feedback = result.feedback
+      if (result.breakdown) resume.breakdown = result.breakdown
 
-    const hasEducation = !!educationMatch
-    const hasExperience = !!experienceMatch
-    const hasSkills = !!skillsMatch
-    const hasProjects = !!projectsMatch
-    const hasCertifications = !!certMatch
-    const hasContact = /(?:email|phone|linkedin|github|portfolio|website|contact|mobile|tel)/i.test(fileContent)
+      await resume.save()
 
-    // Calculate scores
-    let educationScore = hasEducation ? 20 : 5
-    let experienceScore = hasExperience ? 30 : 8
-    let skillsScore = Math.min(25, 5 + detectedSkills.length * 1.0)
-    let contactScore = hasContact ? 12 : 2
-    let projectScore = hasProjects ? 13 : 4
-    let certScore = hasCertifications ? 8 : 0
-    let formatScore = 12
+      // Update User Score
+      await recalculateUserScore(req.user.id)
 
-    const wordCount = fileContent.split(/\s+/).length
-    if (wordCount < 100) formatScore -= 3
-    else if (wordCount < 200) formatScore -= 1
-    else if (wordCount > 2500) formatScore -= 2
-
-    const heuristicsScore = Math.min(100, educationScore + experienceScore + skillsScore + contactScore + projectScore + certScore + formatScore)
-
-    // Calculate relevance using improved semantic heuristic
-    let relevanceScore = 0
-    let usedSBERT = false
-
-    if (jobDescription) {
-      // Use improved semantic heuristic
-      const semanticScore = await getSemanticSimilarity(fileContent, jobDescription)
-      relevanceScore = Math.round(semanticScore * 100)
-    }
-
-    const finalScore = Math.round((heuristicsScore * 0.6 + relevanceScore * 0.4))
-
-    // Generate feedback
-    const feedback = []
-    const improvements = []
-
-    if (hasEducation) {
-      feedback.push('✓ Education section detected')
-    } else {
-      feedback.push('⚠ Education section missing')
-      improvements.push('Add Education section with degree, institution, and graduation date')
-    }
-
-    if (hasExperience) {
-      feedback.push('✓ Work experience section found')
-    } else {
-      feedback.push('⚠ Work experience missing')
-      improvements.push('Include Work Experience with job titles, companies, dates, and achievements')
-    }
-
-    if (detectedSkills.length > 15) {
-      feedback.push(`✓ Excellent skills (${detectedSkills.length} detected)`)
-    } else if (detectedSkills.length > 10) {
-      feedback.push(`✓ Strong skills (${detectedSkills.length} detected)`)
-    } else if (detectedSkills.length > 6) {
-      feedback.push(`✓ Good skills (${detectedSkills.length} detected)`)
-    } else if (detectedSkills.length > 3) {
-      feedback.push(`⚠ Limited skills (${detectedSkills.length} detected)`)
-      improvements.push('Add more technical skills and tools')
-    } else {
-      feedback.push('⚠ Few skills detected')
-      improvements.push('Add a Skills section with programming languages and frameworks')
-    }
-
-    if (hasContact) {
-      feedback.push('✓ Contact information present')
-    } else {
-      feedback.push('⚠ Contact information missing')
-      improvements.push('Add email, phone, LinkedIn, and GitHub')
-    }
-
-    if (hasProjects) {
-      feedback.push('✓ Projects section included')
-    } else {
-      feedback.push('⚠ Projects section missing')
-      improvements.push('Add Projects section with descriptions and technologies')
-    }
-
-    if (hasCertifications) {
-      feedback.push('✓ Certifications included')
-    }
-
-    if (relevanceScore > 75) {
-      feedback.push('✓ Excellent job match')
-    } else if (relevanceScore > 60) {
-      feedback.push('✓ Good job match')
-    } else if (relevanceScore > 40) {
-      feedback.push('⚠ Moderate job match')
-      improvements.push('Use more keywords from the job description')
-    } else if (relevanceScore > 0) {
-      feedback.push('⚠ Limited job match')
-      improvements.push('Customize resume for this specific position')
-    }
-
-    if (wordCount < 150) {
-      improvements.push('Resume is short - expand with more details')
-    } else if (wordCount > 2500) {
-      improvements.push('Resume is long - condense to 1-2 pages')
-    } else {
-      feedback.push('✓ Good resume length')
-    }
-
-    // Extract contact info
-    const emailMatch = fileContent.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i)
-
-    // Phone extraction - multiple patterns
-    let phoneMatch = null
-    const phonePatterns = [
-      /\+?1?\s?[-.\s]?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}/,
-      /\+[0-9]{1,3}\s?[0-9]{6,14}/,
-      /\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}/,
-      /[0-9]{10,}/
-    ]
-
-    for (const pattern of phonePatterns) {
-      const match = fileContent.match(pattern)
-      if (match) {
-        phoneMatch = match[0].trim()
-        break
-      }
-    }
-
-    // CRITICAL: Save resume to database - EVERY upload creates a NEW document
-    // This ensures ATS analysis is ALWAYS fresh per resume upload
-
-    // Generate unique resumeId for this upload event (outside try for response access)
-    const resumeId = `resume_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-
-    try {
-      console.log(`[ATS] NEW RESUME UPLOAD - Creating fresh analysis record`)
-      console.log(`[ATS] Resume ID: ${resumeId}`)
-      console.log(`[ATS] User ID: ${req.user.id}`)
-      console.log(`[ATS] Filename: ${file.name}`)
-      console.log(`[ATS] ATS Score: ${finalScore}`)
-      console.log(`[ATS] Skills detected: ${detectedSkills.length}`)
-
-      // Create NEW resume document (never overwrite previous ones)
-      const resumeDoc = await Resume.create({
-        user: req.user.id,
-        originalFilename: file.name,
-        contentType: file.mimetype,
-        size: file.size,
-        fileKey: resumeId,
-        rawText: fileContent.substring(0, 10000), // Store first 10k chars
-        status: 'scored',
-        atsScore: finalScore,
-        parsedSkills: detectedSkills,
-        uploadedAt: new Date()
+      return res.json({
+        ...result,
+        modelInfo: result.model_info,
+        similarityMethod: result.similarity_method
       })
-
-      console.log(`[ATS] Resume document created: ${resumeDoc._id}`)
-
-      // Recalculate composite employability score
-      const scoreResult = await recalculateUserScore(req.user.id)
-      console.log(`[Score] User ${req.user.id} score recalculated: ${scoreResult.totalScore}`)
-
-    } catch (saveErr) {
-      console.error('[ATS] Error saving resume or recalculating score:', saveErr)
-      // Don't fail the request, but log the error
     }
 
-    return res.json({
-      resumeId, // Unique identifier for this analysis
-      rawText: fileContent.substring(0, 2000),
-      parsedSkills: detectedSkills,
-      skillsByCategory,
-      parsingErrors: [],
-      atsScore: finalScore,
-      breakdown: {
-        education: educationScore,
-        experience: experienceScore,
-        skills: skillsScore,
-        contact: contactScore,
-        projects: projectScore,
-        certifications: certScore,
-        formatting: formatScore,
-        heuristics: heuristicsScore,
-        relevance: Math.round(relevanceScore)
-      },
-      feedback,
-      improvements,
-      contact: {
-        email: emailMatch ? emailMatch[0] : 'Not found',
-        phone: phoneMatch || 'Not found'
-      },
-      metrics: {
-        wordCount,
-        skillCount: detectedSkills.length,
-        skillCategories: Object.keys(skillsByCategory).length,
-        completeness: Math.round((heuristicsScore / 100) * 100)
-      },
-      similarity_method: 'Improved Semantic Heuristic',
-      model_info: {
-        sbert_enabled: false,
-        model_name: 'Enhanced Semantic Heuristic v2'
-      }
-    })
+    // Scenario 2: Legacy File Upload
+    if (req.files?.file) {
+      return res.status(400).json({ error: 'Legacy upload deprecated. Use /resumes/upload first.' })
+    }
+
+    return res.status(400).json({ error: 'resumeId is required' })
+
   } catch (err) {
-    console.error(err)
-    return res.status(500).json({ error: 'Server error' })
+    console.error('Resume parse error:', err)
+    return res.status(500).json({ error: 'Analysis failed' })
   }
 })
 
@@ -2315,21 +2194,30 @@ app.post('/admin/users/:userId/badges', verifyToken, requireRole('admin'), async
 // Remove badge from user
 app.delete('/admin/users/:userId/badges/:badgeId', verifyToken, requireRole('admin'), async (req, res) => {
   try {
+    console.log('DELETE badge hit params:', req.params)
+    console.log('DELETE badge hit user:', req.user)
+
+    console.log('JWT user role:', req.user.role)
+
     const { userId, badgeId } = req.params
 
     // First check if badge exists
     const badge = await Badge.findById(badgeId)
-    if (!badge) return res.status(404).json({ error: 'Badge not found' })
+    if (!badge) {
+      console.log('DELETE failed: Badge not found')
+      return res.status(404).json({ error: 'Badge not found' })
+    }
 
-    // Check ownership
-    if (badge.user.toString() !== userId) {
-      return res.status(400).json({ error: 'Badge does not belong to this user' })
+    // Check ownership - Warn but allow Admin to delete
+    if (String(badge.user) !== String(userId)) {
+      console.log(`[WARNING] Admin deleting badge with owner mismatch: ${badge.user} vs ${userId}`)
     }
 
     // Get definition for audit log
     const definition = await BadgeDefinition.findById(badge.definitionId)
 
-    await Badge.deleteOne({ _id: badgeId })
+    const result = await Badge.deleteOne({ _id: badgeId })
+    console.log('MongoDB Delete Result:', result)
 
     // Recalculate score
     await recalculateUserScore(userId)
