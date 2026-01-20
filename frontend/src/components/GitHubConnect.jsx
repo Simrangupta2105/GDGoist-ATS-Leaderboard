@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 
 export default function GitHubConnect() {
@@ -14,9 +14,9 @@ export default function GitHubConnect() {
   // Fetch persisted GitHub status on mount (BACKEND IS SOURCE OF TRUTH)
   useEffect(() => {
     fetchGitHubStatus()
-  }, [])
+  }, [fetchGitHubStatus])
 
-  const fetchGitHubStatus = async () => {
+  const fetchGitHubStatus = useCallback(async () => {
     try {
       setLoading(true)
       console.log('[GitHub] Fetching status from backend...')
@@ -48,77 +48,73 @@ export default function GitHubConnect() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [apiCall])
 
   const fetchGitHubData = async (username) => {
-    try {
-      // Fetch user profile from GitHub API
-      const userResponse = await fetch(`https://api.github.com/users/${username}`)
-      if (!userResponse.ok) {
-        throw new Error('GitHub user not found')
-      }
-      const userData = await userResponse.json()
-
-      // Fetch user repos
-      const reposResponse = await fetch(`https://api.github.com/users/${username}/repos?per_page=100&sort=stars&order=desc`)
-      if (!reposResponse.ok) {
-        throw new Error('Failed to fetch repositories')
-      }
-      const reposData = await reposResponse.json()
-
-      // Calculate stats
-      let totalCommits = 0
-      let totalPullRequests = 0
-      let totalStars = 0
-      const languagesSet = new Set()
-      const topRepositories = []
-
-      // Get top 5 repos
-      for (let i = 0; i < Math.min(5, reposData.length); i++) {
-        const repo = reposData[i]
-        totalStars += repo.stargazers_count || 0
-        if (repo.language) {
-          languagesSet.add(repo.language)
-        }
-        topRepositories.push({
-          name: repo.name,
-          stars: repo.stargazers_count || 0,
-          language: repo.language || 'Unknown',
-          url: repo.html_url,
-          description: repo.description || 'No description'
-        })
-      }
-
-      // Estimate commits
-      totalCommits = reposData.length * 50 + Math.floor(Math.random() * 500)
-      totalPullRequests = Math.floor(reposData.length * 2 + Math.random() * 100)
-
-      const profileData = {
-        name: userData.name || userData.login,
-        login: userData.login,
-        bio: userData.bio || 'GitHub Developer',
-        avatarUrl: userData.avatar_url,
-        publicRepos: userData.public_repos || 0,
-        followers: userData.followers || 0,
-        following: userData.following || 0,
-        location: userData.location || 'Not specified',
-        company: userData.company || 'Not specified',
-        blog: userData.blog || '',
-        twitterUsername: userData.twitter_username || ''
-      }
-
-      const statsData = {
-        totalCommits,
-        totalPullRequests,
-        totalStars,
-        languages: Array.from(languagesSet),
-        topRepositories
-      }
-
-      return { profile: profileData, stats: statsData }
-    } catch (err) {
-      throw err
+    // Fetch user profile from GitHub API
+    const userResponse = await fetch(`https://api.github.com/users/${username}`)
+    if (!userResponse.ok) {
+      throw new Error('GitHub user not found')
     }
+    const userData = await userResponse.json()
+
+    // Fetch user repos
+    const reposResponse = await fetch(`https://api.github.com/users/${username}/repos?per_page=100&sort=stars&order=desc`)
+    if (!reposResponse.ok) {
+      throw new Error('Failed to fetch repositories')
+    }
+    const reposData = await reposResponse.json()
+
+    // Calculate stats
+    let totalCommits = 0
+    let totalPullRequests = 0
+    let totalStars = 0
+    const languagesSet = new Set()
+    const topRepositories = []
+
+    // Get top 5 repos
+    for (let i = 0; i < Math.min(5, reposData.length); i++) {
+      const repo = reposData[i]
+      totalStars += repo.stargazers_count || 0
+      if (repo.language) {
+        languagesSet.add(repo.language)
+      }
+      topRepositories.push({
+        name: repo.name,
+        stars: repo.stargazers_count || 0,
+        language: repo.language || 'Unknown',
+        url: repo.html_url,
+        description: repo.description || 'No description'
+      })
+    }
+
+    // Estimate commits
+    totalCommits = reposData.length * 50 + Math.floor(Math.random() * 500)
+    totalPullRequests = Math.floor(reposData.length * 2 + Math.random() * 100)
+
+    const profileData = {
+      name: userData.name || userData.login,
+      login: userData.login,
+      bio: userData.bio || 'GitHub Developer',
+      avatarUrl: userData.avatar_url,
+      publicRepos: userData.public_repos || 0,
+      followers: userData.followers || 0,
+      following: userData.following || 0,
+      location: userData.location || 'Not specified',
+      company: userData.company || 'Not specified',
+      blog: userData.blog || '',
+      twitterUsername: userData.twitter_username || ''
+    }
+
+    const statsData = {
+      totalCommits,
+      totalPullRequests,
+      totalStars,
+      languages: Array.from(languagesSet),
+      topRepositories
+    }
+
+    return { profile: profileData, stats: statsData }
   }
 
   const handleConnect = async () => {

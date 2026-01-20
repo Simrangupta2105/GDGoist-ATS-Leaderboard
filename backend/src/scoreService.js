@@ -16,6 +16,7 @@
 const Resume = require('./models/resume.model')
 const GitHub = require('./models/github.model')
 const Badge = require('./models/badge.model')
+const BadgeDefinition = require('./models/badgeDefinition.model')
 const Score = require('./models/score.model')
 
 // FROZEN WEIGHTS - DO NOT MODIFY
@@ -109,16 +110,19 @@ async function calculateGitHubComponent(userId) {
  * Each badge = 2 points, max 10 badges = 20 points
  */
 async function calculateBadgeComponent(userId) {
-    const badges = await Badge.find({ user: userId })
-    const badgeCount = badges.length
+    const badges = await Badge.find({ user: userId }).populate('definitionId')
 
-    // Calculate points (max 20)
-    const points = Math.min(
-        BADGE_SCORING.MAX_POINTS,
-        badgeCount * BADGE_SCORING.POINTS_PER_BADGE
-    )
+    // Sum points from dynamic definitions, fallback to 2 for legacy/system badges
+    const totalPoints = badges.reduce((sum, b) => {
+        const points = b.definitionId ? b.definitionId.points : (BADGE_SCORING.POINTS_PER_BADGE || 2)
+        return sum + points
+    }, 0)
 
-    // Scale to 0-100 for consistency with other components
+    // Clamp to MAX_POINTS (20) for the 20% formula weight
+    const points = Math.min(BADGE_SCORING.MAX_POINTS, totalPoints)
+
+    // Scale to 0-100 for consistency with other components (ATS, GitHub)
+    // 20 points = 100% component score
     return (points / BADGE_SCORING.MAX_POINTS) * 100
 }
 

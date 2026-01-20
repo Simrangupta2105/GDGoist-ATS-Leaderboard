@@ -1,93 +1,145 @@
 import React, { useState, useEffect } from 'react'
+import { useAuth } from '../context/AuthContext'
 
 export default function Badges() {
   const [badges, setBadges] = useState([])
-  const [definitions, setDefinitions] = useState({})
+  const [availableBadges, setAvailableBadges] = useState([])
   const [loading, setLoading] = useState(true)
+  const { apiCall } = useAuth()
 
   useEffect(() => {
+    const fetchBadges = async () => {
+      try {
+        const [userBadgesRes, allBadgesRes] = await Promise.all([
+          apiCall('/me/badges'),
+          apiCall('/badges')
+        ])
+
+        if (userBadgesRes.ok) {
+          const data = await userBadgesRes.json()
+          setBadges(data.badges || [])
+        }
+
+        if (allBadgesRes.ok) {
+          const data = await allBadgesRes.json()
+          setAvailableBadges(data.badges || [])
+        }
+      } catch (error) {
+        console.error('Error fetching badges:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
     fetchBadges()
-    fetchDefinitions()
-  }, [])
-
-  const fetchBadges = async () => {
-    try {
-      const response = await fetch('http://localhost:4000/badges', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setBadges(data.badges)
-      }
-    } catch (err) {
-      console.error('Error fetching badges:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchDefinitions = async () => {
-    try {
-      const response = await fetch('http://localhost:4000/badges/definitions')
-      if (response.ok) {
-        const data = await response.json()
-        setDefinitions(data.definitions)
-      }
-    } catch (err) {
-      console.error('Error fetching badge definitions:', err)
-    }
-  }
+  }, [apiCall])
 
   if (loading) {
-    return <div className="text-center py-8">Loading badges...</div>
+    return (
+      <div className="card p-6 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--accent-primary)' }}></div>
+      </div>
+    )
   }
 
-  const allBadgeTypes = Object.keys(definitions)
-  const earnedBadgeTypes = new Set(badges.map(b => b.type))
-
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6 border border-gray-200 dark:border-slate-700">
-      <h3 className="text-xl font-bold mb-6 text-gray-900 dark:text-white">Achievements & Badges</h3>
+    <div className="card px-6 py-6">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6">
+        <div
+          className="w-10 h-10 rounded-full flex items-center justify-center"
+          style={{ backgroundColor: 'var(--accent-primary)' }}
+        >
+          <span className="text-xl">🏆</span>
+        </div>
+        <h3 style={{ color: 'var(--text-primary)', fontSize: '1.25rem', fontWeight: 600 }}>
+          Achievements & Badges
+        </h3>
+      </div>
 
-      {badges.length === 0 ? (
-        <p className="text-gray-600 dark:text-slate-400 mb-6">No badges earned yet. Keep improving to unlock achievements!</p>
-      ) : (
-        <div className="mb-8">
-          <h4 className="font-semibold mb-4 text-gray-900 dark:text-white">Earned Badges ({badges.length})</h4>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {badges.map(badge => (
-              <div key={badge.type} className="bg-gradient-to-br from-yellow-50 dark:from-slate-700 to-orange-50 dark:to-slate-600 p-4 rounded-lg border-2 border-yellow-300 dark:border-yellow-900">
-                <p className="text-3xl mb-2">{badge.icon}</p>
-                <p className="font-semibold text-sm text-gray-900 dark:text-white">{badge.name}</p>
-                <p className="text-xs text-gray-600 dark:text-slate-400">{badge.description}</p>
-                <p className="text-xs text-gray-500 dark:text-slate-500 mt-2">
-                  {new Date(badge.earnedAt).toLocaleDateString()}
-                </p>
+      {/* Earned Badges */}
+      <div className="mb-6">
+        <h4 style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.75rem' }}>
+          Earned Badges ({badges.length})
+        </h4>
+        {badges.length > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {badges.map((badge, index) => (
+              <div
+                key={index}
+                className="p-4 text-center"
+                style={{
+                  backgroundColor: 'var(--bg-card-soft)',
+                  border: '1px solid var(--accent-primary)',
+                  borderRadius: 'var(--radius-lg)'
+                }}
+              >
+                <div className="text-3xl mb-2">{badge.icon || '🏅'}</div>
+                <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.875rem' }}>
+                  {badge.name}
+                </div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                  {badge.description}
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div
+            className="p-6 text-center"
+            style={{
+              backgroundColor: 'var(--bg-card-soft)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px solid var(--border-subtle)'
+            }}
+          >
+            <span className="text-4xl mb-2 block">🎯</span>
+            <p style={{ color: 'var(--text-muted)' }}>No badges earned yet. Keep improving!</p>
+          </div>
+        )}
+      </div>
 
+      {/* Available Badges */}
       <div>
-        <h4 className="font-semibold mb-4 text-gray-900 dark:text-white">Available Badges</h4>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {allBadgeTypes.map(badgeType => {
-            const def = definitions[badgeType]
-            const earned = earnedBadgeTypes.has(badgeType)
+        <h4 style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.75rem' }}>
+          Available Badges
+        </h4>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {availableBadges.map((badge, index) => {
+            const isEarned = badges.some(b => b.name === badge.name)
             return (
               <div
-                key={badgeType}
-                className={`p-4 rounded-lg border-2 transition ${
-                  earned
-                    ? 'bg-gradient-to-br from-yellow-50 dark:from-slate-700 to-orange-50 dark:to-slate-600 border-yellow-300 dark:border-yellow-900'
-                    : 'bg-gray-50 dark:bg-slate-700 border-gray-300 dark:border-slate-600 opacity-60'
-                }`}
+                key={index}
+                className="p-4 text-center"
+                style={{
+                  backgroundColor: 'var(--bg-card-soft)',
+                  border: isEarned ? '1px solid var(--accent-success)' : '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-lg)',
+                  opacity: isEarned ? 1 : 0.7
+                }}
               >
-                <p className={`text-3xl mb-2 ${earned ? '' : 'grayscale'}`}>{def.icon}</p>
-                <p className="font-semibold text-sm text-gray-900 dark:text-white">{def.name}</p>
-                <p className="text-xs text-gray-600 dark:text-slate-400">{def.description}</p>
-                {earned && <p className="text-xs text-green-600 dark:text-green-400 mt-2">✓ Earned</p>}
+                <div className="text-3xl mb-2" style={{ filter: isEarned ? 'none' : 'grayscale(1)' }}>
+                  {badge.icon || '🏅'}
+                </div>
+                <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.875rem' }}>
+                  {badge.name}
+                </div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                  {badge.criteria}
+                </div>
+                {isEarned && (
+                  <div
+                    className="mt-2 px-2 py-1 inline-block"
+                    style={{
+                      backgroundColor: 'var(--accent-success)',
+                      color: 'white',
+                      borderRadius: 'var(--radius-lg)',
+                      fontSize: '0.625rem',
+                      fontWeight: 600
+                    }}
+                  >
+                    ✓ Earned
+                  </div>
+                )}
               </div>
             )
           })}

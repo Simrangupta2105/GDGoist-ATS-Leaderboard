@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 
 const AuthContext = createContext()
 
@@ -17,38 +17,44 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true)
   const [token, setToken] = useState(localStorage.getItem('token'))
 
+  const logout = useCallback(() => {
+    localStorage.removeItem('token')
+    setToken(null)
+    setUser(null)
+  }, [])
+
   useEffect(() => {
+    const fetchUserProfile = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/me`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          setUser(data.user)
+        } else {
+          logout()
+        }
+      } catch (error) {
+        console.error('Failed to fetch user profile:', error)
+        logout()
+      } finally {
+        setLoading(false)
+      }
+    }
+
     if (token) {
       fetchUserProfile()
     } else {
       setLoading(false)
     }
-  }, [token])
+  }, [token, logout])
 
-  const fetchUserProfile = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setUser(data.user)
-      } else {
-        logout()
-      }
-    } catch (error) {
-      console.error('Failed to fetch user profile:', error)
-      logout()
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const login = async (email, password) => {
+  const login = useCallback(async (email, password) => {
     try {
       const response = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
@@ -71,9 +77,9 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       return { success: false, error: 'Network error' }
     }
-  }
+  }, [])
 
-  const register = async (name, email, password) => {
+  const register = useCallback(async (name, email, password) => {
     try {
       const response = await fetch(`${API_BASE}/auth/register`, {
         method: 'POST',
@@ -96,26 +102,25 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       return { success: false, error: 'Network error' }
     }
-  }
+  }, [])
 
-  const logout = () => {
-    localStorage.removeItem('token')
-    setToken(null)
-    setUser(null)
-  }
-
-  const apiCall = async (endpoint, options = {}) => {
+  const apiCall = useCallback(async (endpoint, options = {}) => {
     console.log('Making API call to:', `${API_BASE}${endpoint}`)
     console.log('With options:', options)
 
     try {
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        ...options.headers
+      }
+
+      if (!(options.body instanceof FormData) && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json'
+      }
+
       const response = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...options.headers
-        }
+        headers
       })
 
       console.log('API response status:', response.status)
@@ -124,9 +129,9 @@ export const AuthProvider = ({ children }) => {
       console.error('API call error:', error)
       throw error
     }
-  }
+  }, [token])
 
-  const value = {
+  const value = useMemo(() => ({
     user,
     loading,
     token,
@@ -135,7 +140,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     apiCall,
     setUser
-  }
+  }), [user, loading, token, login, register, logout, apiCall])
 
   return (
     <AuthContext.Provider value={value}>

@@ -97,15 +97,20 @@ export default function Navbar() {
             <ThemeToggle />
 
             {/* User Pill */}
-            <div
-              className="hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-full"
+            <Link
+              to="/profile/edit"
+              className="hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-full hover:bg-opacity-80 transition-colors"
               style={{ backgroundColor: 'var(--bg-secondary)' }}
             >
               <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-white text-sm font-semibold"
+                className="w-7 h-7 rounded-full flex items-center justify-center text-white text-sm font-semibold overflow-hidden"
                 style={{ backgroundColor: 'var(--accent-primary)' }}
               >
-                {user?.name?.charAt(0)?.toUpperCase()}
+                {user?.profilePicture ? (
+                  <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
+                ) : (
+                  user?.name?.charAt(0)?.toUpperCase()
+                )}
               </div>
               <span
                 className="text-small font-medium max-w-[120px] truncate"
@@ -113,7 +118,7 @@ export default function Navbar() {
               >
                 {user?.name}
               </span>
-            </div>
+            </Link>
 
             {/* Sign Out */}
             <button

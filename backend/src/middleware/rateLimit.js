@@ -14,7 +14,7 @@ const rateLimit = require('express-rate-limit')
  */
 const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
+    max: 500,
     message: {
         error: 'Too many requests from this IP, please try again later',
         retryAfter: '15 minutes'
@@ -22,8 +22,8 @@ const generalLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     skip: (req) => {
-        // Skip rate limiting for health checks
-        return req.path === '/health'
+        // Skip rate limiting for health checks or if explicitly disabled
+        return req.path === '/health' || process.env.DISABLE_RATE_LIMIT === 'true'
     }
 })
 
@@ -48,13 +48,14 @@ const authLimiter = rateLimit({
  */
 const adminLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 30,
+    max: 1000,
     message: {
         error: 'Too many admin requests, please try again later',
         retryAfter: '15 minutes'
     },
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    skip: () => process.env.DISABLE_RATE_LIMIT === 'true'
 })
 
 /**

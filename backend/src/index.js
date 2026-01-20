@@ -4,11 +4,15 @@ const cors = require('cors')
 const fileUpload = require('express-fileupload')
 const fetch = require('node-fetch')
 const FormData = require('form-data')
+const path = require('path')
+const fs = require('fs')
 const { connect } = require('./db')
 const app = express()
 const bcrypt = require('bcryptjs')
 const User = require('./models/user.model')
 const Resume = require('./models/resume.model')
+const Badge = require('./models/badge.model')
+const BadgeDefinition = require('./models/badgeDefinition.model')
 const { recalculateUserScore } = require('./scoreService')
 const { generateToken, verifyToken, requireRole } = require('./middleware/auth')
 const { requireOnboarded } = require('./middleware/onboarding')
@@ -19,6 +23,7 @@ connect()
 app.use(cors())
 app.use(express.json())
 app.use(fileUpload())
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')))
 
 // ============ ADMIN AUTHORIZATION ============
 /**
@@ -364,10 +369,149 @@ app.get('/me', verifyToken, async (req, res) => {
   }
 })
 
+// ============ PROFILE MANAGEMENT ENDPOINTS ============
+
+// Get current user's full profile
+app.get('/me/profile', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-passwordHash')
+    if (!user) return res.status(404).json({ error: 'User not found' })
+
+    return res.json({
+      profile: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        department: user.department,
+        graduationYear: user.graduationYear,
+        bio: user.bio || '',
+        profilePicture: user.profilePicture || '',
+        socialLinks: user.socialLinks || {},
+        projects: user.projects || [],
+        experiences: user.experiences || [],
+        profileVisibility: user.profileVisibility || 'public',
+        github: user.github,
+        createdAt: user.createdAt
+      }
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Update current user's profile
+app.put('/me/profile', verifyToken, async (req, res) => {
+  try {
+    const allowedUpdates = ['name', 'department', 'graduationYear', 'bio', 'profilePicture', 'socialLinks', 'projects', 'experiences', 'profileVisibility']
+    const updates = {}
+    for (const key of allowedUpdates) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key]
+    }
+
+    const user = await User.findByIdAndUpdate(req.user.id, { $set: updates }, { new: true }).select('-passwordHash')
+    if (!user) return res.status(404).json({ error: 'User not found' })
+
+    console.log(`[Profile] Updated profile for user ${user.email}`)
+    return res.json({
+      message: 'Profile updated successfully',
+      profile: {
+        id: user._id, name: user.name, email: user.email, department: user.department,
+        graduationYear: user.graduationYear, bio: user.bio || '', profilePicture: user.profilePicture || '',
+        socialLinks: user.socialLinks || {}, projects: user.projects || [],
+        experiences: user.experiences || [], profileVisibility: user.profileVisibility || 'public'
+      }
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Upload profile picture
+app.post('/me/avatar', verifyToken, async (req, res) => {
+  try {
+    if (!req.files || !req.files.avatar) {
+      return res.status(400).json({ error: 'No file uploaded' })
+    }
+
+    const file = req.files.avatar
+    const uploadDir = path.join(__dirname, '../uploads')
+
+    // Ensure uploads directory exists
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true })
+    }
+
+    // Generate unique filename
+    const fileExt = path.extname(file.name)
+    const filename = `avatar-${req.user.id}-${Date.now()}${fileExt}`
+    const uploadPath = path.join(uploadDir, filename)
+
+    // Move file to uploads directory
+    await file.mv(uploadPath)
+
+    // Build URL (assuming backend is serving static files from /uploads)
+    const protocol = req.protocol
+    const host = req.get('host')
+    const fileUrl = `${protocol}://${host}/uploads/${filename}`
+
+    // Update user profile
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { profilePicture: fileUrl },
+      { new: true }
+    ).select('-passwordHash')
+
+    return res.json({
+      message: 'Avatar uploaded successfully',
+      url: fileUrl,
+      profile: {
+        profilePicture: user.profilePicture
+      }
+    })
+
+  } catch (err) {
+    console.error('Avatar upload error:', err)
+    return res.status(500).json({ error: 'Failed to upload avatar' })
+  }
+})
+
+// Get public profile of any user (for leaderboard clicks)
+app.get('/users/:userId/profile', async (req, res) => {
+  try {
+    const { userId } = req.params
+    const user = await User.findById(userId).select('-passwordHash -email')
+    if (!user) return res.status(404).json({ error: 'User not found' })
+
+    // Private profile - return limited info
+    if (user.profileVisibility === 'private') {
+      return res.json({ profile: { id: user._id, name: user.name, department: user.department, graduationYear: user.graduationYear, isPrivate: true } })
+    }
+
+    // Get user's score
+    const Score = require('./models/score.model')
+    const latestScore = await Score.findOne({ user: userId }).sort({ createdAt: -1 })
+
+    return res.json({
+      profile: {
+        id: user._id, name: user.name, department: user.department, graduationYear: user.graduationYear,
+        bio: user.bio || '', profilePicture: user.profilePicture || '', socialLinks: user.socialLinks || {},
+        projects: user.projects || [], experiences: user.experiences || [],
+        github: user.github?.username ? { username: user.github.username } : null,
+        score: latestScore ? { total: latestScore.totalScore, ats: latestScore.resumeScore, github: latestScore.githubScore, badges: latestScore.badgesScore } : null,
+        isPrivate: false
+      }
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
 const { generateUploadUrl } = require('./s3')
 const Score = require('./models/score.model')
 const GitHub = require('./models/github.model')
-const Badge = require('./models/badge.model')
 const Connection = require('./models/connection.model')
 const SkillGap = require('./models/skillgap.model')
 const { getAuthorizationUrl, getAccessToken, syncGitHubData } = require('./github')
@@ -531,10 +675,12 @@ app.get('/leaderboard', async (req, res) => {
     const rankOffset = (pageNum - 1) * lim
     const entries = data.map((d, i) => ({
       rank: rankOffset + i + 1,
+      userId: d.userDoc._id,
       totalScore: d.totalScore,
+      name: d.userDoc.name || 'Anonymous',
       department: d.userDoc.department || null,
       graduationYear: d.userDoc.graduationYear || null,
-      // anonymous-by-default: no user identifiers returned
+      profilePicture: d.userDoc.profilePicture || null
     }))
 
     return res.json({ totalCount, page: pageNum, limit: lim, entries })
@@ -1579,6 +1725,157 @@ app.get('/badges/progress', verifyToken, async (req, res) => {
 // Apply rate limiting to admin routes
 app.use('/admin', adminLimiter)
 
+// Get all users for admin (with pagination and search)
+app.get('/admin/users', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search = '', department = '', graduationYear = '' } = req.query
+
+    // Build query
+    const query = { role: { $ne: 'admin' } } // Exclude admins from user list
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ]
+    }
+    if (department) {
+      query.department = department
+    }
+    if (graduationYear) {
+      query.graduationYear = parseInt(graduationYear)
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit)
+    const totalCount = await User.countDocuments(query)
+
+    const users = await User.find(query)
+      .select('name email department graduationYear totalScore atsScore githubScore badgesScore hasResume profilePicture createdAt')
+      .sort({ totalScore: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+
+    await createAuditLog('ADMIN_VIEW_USERS', req.user.id, { search, department, graduationYear })
+
+    return res.json({
+      users: users.map(u => ({
+        id: u._id,
+        name: u.name || 'Anonymous',
+        email: u.email,
+        department: u.department || 'Not set',
+        graduationYear: u.graduationYear || null,
+        totalScore: u.totalScore || 0,
+        atsScore: u.atsScore || 0,
+        githubScore: u.githubScore || 0,
+        badgesScore: u.badgesScore || 0,
+        hasResume: !!u.hasResume,
+        profilePicture: u.profilePicture,
+        joinedAt: u.createdAt
+      })),
+      totalCount,
+      page: parseInt(page),
+      totalPages: Math.ceil(totalCount / parseInt(limit))
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Export users as CSV
+app.get('/admin/users/export', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { search = '', department = '', graduationYear = '' } = req.query
+    const query = { role: { $ne: 'admin' } }
+
+    if (search) query.$or = [{ name: { $regex: search, $options: 'i' } }, { email: { $regex: search, $options: 'i' } }]
+    if (department) query.department = department
+    if (graduationYear) query.graduationYear = parseInt(graduationYear)
+
+    const users = await User.find(query)
+      .select('name email department graduationYear totalScore atsScore githubScore badgesScore bio profilePicture createdAt')
+      .sort({ totalScore: -1 })
+
+    // Generate CSV Header
+    let csv = 'Name,Email,Department,Year,Total Score,ATS Score,GitHub Score,Badges Score,Bio,Profile Picture,Joined At\n'
+
+    // Generate CSV Rows
+    users.forEach(u => {
+      const bio = (u.bio || '').replace(/"/g, '""') // Escape quotes
+      const row = [
+        `"${u.name || 'Anonymous'}"`,
+        `"${u.email}"`,
+        `"${u.department || 'Not set'}"`,
+        u.graduationYear || '',
+        u.totalScore || 0,
+        u.atsScore || 0,
+        u.githubScore || 0,
+        u.badgesScore || 0,
+        `"${bio}"`,
+        `"${u.profilePicture || ''}"`,
+        `"${new Date(u.createdAt).toISOString()}"`
+      ].join(',')
+      csv += row + '\n'
+    })
+
+    await createAuditLog('ADMIN_EXPORT_USERS', req.user.id, { search, department, graduationYear })
+
+    res.header('Content-Type', 'text/csv')
+    res.attachment(`users_export_${Date.now()}.csv`)
+    return res.send(csv)
+
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Get platform overview stats
+app.get('/admin/analytics/platform', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments({ role: { $ne: 'admin' } })
+    const Score = require('./models/score.model')
+    const GitHub = require('./models/github.model')
+
+    const totalScores = await Score.countDocuments({})
+    const totalGitHubConnections = await GitHub.countDocuments({})
+
+    // Calculate engagement (users with scores / total users)
+    const engagementRate = totalUsers > 0 ? Math.round((totalScores / totalUsers) * 100) : 0
+
+    // Get average scores
+    const scores = await Score.aggregate([
+      {
+        $group: {
+          _id: null,
+          avgTotal: { $avg: "$total" },
+          avgAts: { $avg: "$ats" },
+          avgGithub: { $avg: "$github" },
+          avgBadges: { $avg: "$badges" }
+        }
+      }
+    ])
+
+    return res.json({
+      platform: {
+        totalUsers,
+        totalScores,
+        totalGitHubConnections,
+        engagementRate
+      },
+      averageScores: scores[0] ? {
+        total: Math.round(scores[0].avgTotal),
+        ats: Math.round(scores[0].avgAts),
+        github: Math.round(scores[0].avgGithub),
+        badges: Math.round(scores[0].avgBadges)
+      } : { total: 0, ats: 0, github: 0, badges: 0 }
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
 // Get cohort analytics (aggregated, NO PII)
 app.get('/admin/analytics/cohorts', verifyToken, requireRole('admin'), async (req, res) => {
   try {
@@ -1752,6 +2049,132 @@ app.delete('/me/delete-account', verifyToken, async (req, res) => {
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: err.message })
+  }
+})
+
+// ============ BADGE MANAGEMENT SYSTEM ============
+
+// GET all available badge definitions (Public)
+app.get('/badges', async (req, res) => {
+  try {
+    const badges = await BadgeDefinition.find({ active: true }).sort('createdAt')
+    return res.json({ badges })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// GET my badges (Student) - Populated with definitions
+app.get('/me/badges', verifyToken, async (req, res) => {
+  try {
+    const badges = await Badge.find({ user: req.user.id })
+      .populate('definitionId')
+      .sort('-earnedAt')
+
+    // Transform to include definition details if available, fallback to legacy
+    const formattedBadges = badges.map(b => {
+      const def = b.definitionId
+      return {
+        _id: b._id,
+        name: def ? def.name : b.badgeType, // Fallback to basic name
+        description: def ? def.description : (b.metadata?.description || 'Awarded badge'),
+        icon: def ? def.icon : (b.metadata?.icon || '🏅'),
+        earnedAt: b.earnedAt,
+        isSystem: !def
+      }
+    })
+
+    return res.json({ badges: formattedBadges })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// POST Create new badge definition (Admin) - With Icon Upload
+app.post('/admin/badges', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { name, description, criteria, points } = req.body
+
+    if (!req.files || !req.files.icon) {
+      return res.status(400).json({ error: 'Icon image is required' })
+    }
+
+    const iconFile = req.files.icon
+
+    // Validate image type
+    if (!iconFile.mimetype.startsWith('image/')) {
+      return res.status(400).json({ error: 'File must be an image' })
+    }
+
+    // Save icon
+    const fileExt = path.extname(iconFile.name)
+    const iconFilename = `badge_${Date.now()}${fileExt}`
+    const uploadPath = path.join(__dirname, '../uploads/badges', iconFilename)
+
+    // Ensure directory exists
+    const badgeDir = path.dirname(uploadPath)
+    if (!fs.existsSync(badgeDir)) {
+      fs.mkdirSync(badgeDir, { recursive: true })
+    }
+
+    await iconFile.mv(uploadPath)
+
+    const iconUrl = `/uploads/badges/${iconFilename}`
+
+    const badgeDef = await BadgeDefinition.create({
+      name,
+      description,
+      criteria,
+      icon: iconUrl,
+      points: points ? Number(points) : 2
+    })
+
+    await createAuditLog('ADMIN_CREATE_BADGE', req.user.id, { badgeName: name })
+
+    return res.json({ badge: badgeDef })
+  } catch (err) {
+    console.error(err)
+    if (err.code === 11000) {
+      return res.status(400).json({ error: 'Badge name already exists' })
+    }
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// POST Assign badge to user (Admin)
+app.post('/admin/users/:userId/badges', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { userId } = req.params
+    const { badgeDefinitionId } = req.body
+
+    if (!badgeDefinitionId) return res.status(400).json({ error: 'Badge Definition ID required' })
+
+    const badgeDef = await BadgeDefinition.findById(badgeDefinitionId)
+    if (!badgeDef) return res.status(404).json({ error: 'Badge Definition not found' })
+
+    // Check if already assigned
+    const existing = await Badge.findOne({ user: userId, definitionId: badgeDefinitionId })
+    if (existing) return res.status(400).json({ error: 'User already has this badge' })
+
+    // Assign
+    const newBadge = await Badge.create({
+      user: userId,
+      badgeType: badgeDef.name, // Store name as type for legacy compat
+      definitionId: badgeDef._id,
+      earnedAt: new Date()
+    })
+
+    // Recalculate score
+    await recalculateUserScore(userId)
+
+    await createAuditLog('ADMIN_ASSIGN_BADGE', req.user.id, { targetUser: userId, badgeName: badgeDef.name })
+
+    return res.json({ success: true, badge: newBadge })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ error: 'Server error' })
   }
 })
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import ResumeUpload from './ResumeUpload'
@@ -17,35 +17,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
 
-  useEffect(() => {
-    if (!user?.department || !user?.graduationYear) {
-      navigate('/onboarding')
-      return
-    }
-    checkConsentAndFetchData()
-  }, [user, navigate])
-
-  const checkConsentAndFetchData = async () => {
-    try {
-      const testResponse = await apiCall('/me')
-      const userData = await testResponse.json()
-
-      if (testResponse.ok) {
-        const hasConsentGiven = userData.user?.dpdpConsent?.consented === true
-        setHasConsent(hasConsentGiven)
-        if (!hasConsentGiven) {
-          setShowConsentModal(true)
-        }
-      }
-      await fetchUserScore()
-    } catch (error) {
-      console.error('Error checking consent:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchUserScore = async () => {
+  const fetchUserScore = useCallback(async () => {
     try {
       const response = await apiCall('/score/breakdown')
       if (response.ok) {
@@ -76,7 +48,36 @@ export default function Dashboard() {
         rank: null
       })
     }
-  }
+  }, [apiCall])
+
+  useEffect(() => {
+    if (!user?.department || !user?.graduationYear) {
+      navigate('/onboarding')
+      return
+    }
+
+    const checkConsentAndFetchData = async () => {
+      try {
+        const testResponse = await apiCall('/me')
+        const userData = await testResponse.json()
+
+        if (testResponse.ok) {
+          const hasConsentGiven = userData.user?.dpdpConsent?.consented === true
+          setHasConsent(hasConsentGiven)
+          if (!hasConsentGiven) {
+            setShowConsentModal(true)
+          }
+        }
+        await fetchUserScore()
+      } catch (error) {
+        console.error('Error checking consent:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    checkConsentAndFetchData()
+  }, [user, navigate, apiCall, fetchUserScore])
 
   const handleConsentGiven = () => {
     setHasConsent(true)
@@ -146,7 +147,7 @@ export default function Dashboard() {
   const insight = getAIInsight()
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
+    <div className="min-h-screen page-transition" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <div className="container-premium py-10">
         {/* Header */}
         <header className="mb-10 animate-fadeUp">
@@ -321,12 +322,25 @@ export default function Dashboard() {
             <div className="space-y-6">
               {/* Profile Card */}
               <div className="card-premium">
-                <h3
-                  className="text-subheading mb-4"
-                  style={{ color: 'var(--text-primary)' }}
-                >
-                  Profile
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3
+                    className="text-subheading"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    Profile
+                  </h3>
+                  <button
+                    onClick={() => navigate('/profile/edit')}
+                    className="px-4 py-2 text-sm font-medium"
+                    style={{
+                      backgroundColor: 'var(--accent-primary)',
+                      color: 'white',
+                      borderRadius: 'var(--radius-lg)'
+                    }}
+                  >
+                    Edit Profile
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                   <div>
                     <dt

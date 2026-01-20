@@ -1,33 +1,29 @@
 import React, { useState } from 'react'
+import { useAuth } from '../context/AuthContext'
 
 export default function PeerDiscovery() {
-  const [searchSkills, setSearchSkills] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [peers, setPeers] = useState([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [connections, setConnections] = useState([])
+  const [error, setError] = useState('')
+  const { apiCall } = useAuth()
 
-  const handleSearch = async (e) => {
-    e.preventDefault()
-    if (!searchSkills.trim()) return
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return
+
+    setLoading(true)
+    setError('')
 
     try {
-      setLoading(true)
-      setError(null)
-      const skills = searchSkills.split(',').map(s => s.trim())
-      const query = new URLSearchParams({ skills: skills.join(',') })
-      const response = await fetch(`http://localhost:4000/peers/search?${query}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      })
+      const response = await apiCall(`/peers/search?skills=${encodeURIComponent(searchQuery)}`)
       if (response.ok) {
         const data = await response.json()
-        setPeers(data.peers)
+        setPeers(data.peers || [])
       } else {
         setError('Failed to search peers')
       }
-    } catch (err) {
+    } catch (error) {
       setError('Error searching peers')
-      console.error(err)
     } finally {
       setLoading(false)
     }
@@ -35,91 +31,176 @@ export default function PeerDiscovery() {
 
   const handleConnect = async (peerId) => {
     try {
-      const response = await fetch('http://localhost:4000/connections/request', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ recipientId: peerId })
+      const response = await apiCall(`/peers/${peerId}/connect`, {
+        method: 'POST'
       })
       if (response.ok) {
-        setConnections([...connections, peerId])
-        alert('Connection request sent!')
-      } else {
-        alert('Failed to send connection request')
+        setPeers(peers.map(p =>
+          p.id === peerId ? { ...p, connected: true } : p
+        ))
       }
-    } catch (err) {
-      console.error('Error sending connection request:', err)
+    } catch (error) {
+      console.error('Error connecting to peer:', error)
     }
   }
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
-      <h3 className="text-xl font-bold mb-6 text-gray-900 dark:text-white">Find Peers</h3>
-
-      <form onSubmit={handleSearch} className="mb-6">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="Search by skills (e.g., Python, JavaScript, Go)"
-            value={searchSkills}
-            onChange={(e) => setSearchSkills(e.target.value)}
-            className="flex-1 px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <button
-            type="submit"
-            disabled={loading}
-            className="bg-blue-600 dark:bg-blue-700 text-white px-6 py-2 rounded-lg hover:bg-blue-700 dark:hover:bg-blue-800 transition disabled:opacity-50"
-          >
-            {loading ? 'Searching...' : 'Search'}
-          </button>
+    <div className="card px-6 py-6">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6">
+        <div
+          className="w-10 h-10 rounded-full flex items-center justify-center"
+          style={{ backgroundColor: 'var(--accent-primary)' }}
+        >
+          <span className="text-xl">👥</span>
         </div>
-      </form>
+        <h3 style={{ color: 'var(--text-primary)', fontSize: '1.25rem', fontWeight: 600 }}>
+          Peer Discovery
+        </h3>
+      </div>
 
-      {error && <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>}
+      {/* Search Box */}
+      <div className="flex gap-2 mb-6">
+        <input
+          type="text"
+          placeholder="Search by skills (e.g., React, Python)"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+          className="flex-1 px-4 py-3"
+          style={{
+            backgroundColor: 'var(--bg-card-soft)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-lg)',
+            color: 'var(--text-primary)',
+            fontSize: '0.875rem'
+          }}
+        />
+        <button
+          onClick={handleSearch}
+          disabled={loading}
+          className="px-6 py-3 font-semibold"
+          style={{
+            backgroundColor: 'var(--accent-primary)',
+            color: 'white',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          {loading ? 'Searching...' : 'Search'}
+        </button>
+      </div>
 
-      {peers.length === 0 && searchSkills && !loading && (
-        <p className="text-gray-600 dark:text-gray-400">No peers found with those skills.</p>
+      {/* Error Message */}
+      {error && (
+        <div
+          className="mb-4 px-4 py-3"
+          style={{
+            backgroundColor: 'var(--danger-bg)',
+            border: '1px solid var(--accent-danger)',
+            borderRadius: 'var(--radius-lg)'
+          }}
+        >
+          <p style={{ color: 'var(--accent-danger)' }}>{error}</p>
+        </div>
       )}
 
-      <div className="space-y-4">
-        {peers.map(peer => (
-          <div key={peer.id} className="border border-gray-200 dark:border-slate-700 rounded-lg p-4 hover:shadow-md dark:hover:shadow-lg transition bg-white dark:bg-slate-700">
-            <div className="flex justify-between items-start mb-3">
-              <div>
-                <p className="font-semibold text-gray-900 dark:text-white">{peer.name}</p>
-                <p className="text-sm text-gray-600 dark:text-gray-400">{peer.department}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{peer.score}</p>
-                <p className="text-xs text-gray-600 dark:text-gray-400">Score</p>
-              </div>
-            </div>
-
-            {peer.skills && peer.skills.length > 0 && (
-              <div className="mb-3">
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Skills:</p>
-                <div className="flex flex-wrap gap-2">
-                  {peer.skills.map(skill => (
-                    <span key={skill} className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs px-2 py-1 rounded">
-                      {skill}
-                    </span>
-                  ))}
+      {/* Results */}
+      {peers.length > 0 ? (
+        <div className="space-y-3">
+          {peers.map((peer) => (
+            <div
+              key={peer.id}
+              className="p-4 flex items-center justify-between"
+              style={{
+                backgroundColor: 'var(--bg-card-soft)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-lg)'
+              }}
+            >
+              <div className="flex items-center gap-4">
+                <div
+                  className="w-12 h-12 rounded-full flex items-center justify-center"
+                  style={{ backgroundColor: 'var(--accent-primary)' }}
+                >
+                  <span style={{ color: 'white', fontWeight: 600, fontSize: '1.125rem' }}>
+                    {peer.name?.charAt(0) || '?'}
+                  </span>
+                </div>
+                <div>
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{peer.name}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                    {peer.department} • Class of {peer.graduationYear}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {peer.skills?.slice(0, 4).map((skill, i) => (
+                      <span
+                        key={i}
+                        className="px-2 py-0.5"
+                        style={{
+                          backgroundColor: 'var(--bg-card)',
+                          color: 'var(--accent-primary)',
+                          borderRadius: 'var(--radius-lg)',
+                          fontSize: '0.75rem',
+                          border: '1px solid var(--border-subtle)'
+                        }}
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                    {peer.skills?.length > 4 && (
+                      <span
+                        className="px-2 py-0.5"
+                        style={{
+                          color: 'var(--text-muted)',
+                          fontSize: '0.75rem'
+                        }}
+                      >
+                        +{peer.skills.length - 4}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            )}
 
-            <button
-              onClick={() => handleConnect(peer.id)}
-              disabled={connections.includes(peer.id)}
-              className="w-full bg-green-600 dark:bg-green-700 text-white py-2 rounded-lg hover:bg-green-700 dark:hover:bg-green-800 transition disabled:bg-gray-400 dark:disabled:bg-gray-600"
-            >
-              {connections.includes(peer.id) ? 'Request Sent' : 'Connect'}
-            </button>
-          </div>
-        ))}
-      </div>
+              <div className="text-right">
+                <div style={{ color: 'var(--accent-primary)', fontWeight: 700, fontSize: '1.25rem' }}>
+                  {peer.score}
+                </div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>ATS Score</div>
+                <button
+                  onClick={() => handleConnect(peer.id)}
+                  disabled={peer.connected}
+                  className="mt-2 px-4 py-1.5 font-medium"
+                  style={{
+                    backgroundColor: peer.connected ? 'var(--accent-success)' : 'var(--accent-primary)',
+                    color: 'white',
+                    borderRadius: 'var(--radius-lg)',
+                    fontSize: '0.75rem',
+                    opacity: peer.connected ? 0.8 : 1
+                  }}
+                >
+                  {peer.connected ? '✓ Connected' : 'Connect'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div
+          className="p-8 text-center"
+          style={{
+            backgroundColor: 'var(--bg-card-soft)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-subtle)'
+          }}
+        >
+          <span className="text-4xl mb-3 block">🔍</span>
+          <p style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Find peers with similar skills</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            Search by skills to discover classmates you can collaborate with
+          </p>
+        </div>
+      )}
     </div>
   )
 }
