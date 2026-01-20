@@ -85,7 +85,16 @@ export default function PublicProfile() {
                     <div className="flex flex-col items-center text-center">
                         <div className="w-24 h-24 mb-4 rounded-full flex items-center justify-center overflow-hidden" style={{ backgroundColor: 'var(--accent-primary)' }}>
                             {profile.profilePicture ? (
-                                <img src={profile.profilePicture} alt={profile.name} className="w-full h-full object-cover" />
+                                <img
+                                    src={profile.profilePicture}
+                                    alt={profile.name}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                        e.target.onerror = null;
+                                        e.target.style.display = 'none';
+                                        e.target.parentNode.innerHTML = `<span style="color: white; font-size: 2rem; font-weight: 700">${profile.name?.charAt(0) || '?'}</span>`;
+                                    }}
+                                />
                             ) : (
                                 <span style={{ color: 'white', fontSize: '2rem', fontWeight: 700 }}>{profile.name?.charAt(0) || '?'}</span>
                             )}

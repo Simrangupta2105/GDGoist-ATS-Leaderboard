@@ -291,6 +291,11 @@ export default function Leaderboard() {
                                 alt={entry.name}
                                 className="w-10 h-10 rounded-full object-cover"
                                 style={{ border: '2px solid var(--border-subtle)' }}
+                                onError={(e) => {
+                                  e.target.onerror = null;
+                                  e.target.style.display = 'none';
+                                  e.target.parentNode.innerHTML = `<div class="w-10 h-10 rounded-full flex items-center justify-center text-white" style="background-color: var(--accent-primary)">${entry.name?.charAt(0) || '?'}</div>`;
+                                }}
                               />
                               <span
                                 className="absolute -bottom-1 -right-1 inline-flex items-center justify-center w-5 h-5 text-xs font-bold rounded-full"

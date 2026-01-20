@@ -299,7 +299,10 @@ export default function AdminBadgeManager() {
                                             src={badge.icon}
                                             alt={badge.name}
                                             className="w-full h-full object-cover"
-                                            onError={(e) => { e.target.src = 'https://ui-avatars.com/api/?name=' + badge.name + '&background=D4A053&color=fff' }}
+                                            onError={(e) => {
+                                                e.target.style.display = 'none';
+                                                e.target.insertAdjacentHTML('afterend', '<div style="width: 100%; height: 100%; display: flex; items-center; justify-center; background-color: var(--bg-card-soft); font-size: 1.5rem">🏅</div>');
+                                            }}
                                         />
                                     </div>
                                     <div className="flex-1 min-w-0">
