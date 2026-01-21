@@ -87,14 +87,14 @@ def detect_formatting_risks(text: str) -> List[str]:
         risks.append('Empty or unreadable document')
         return risks
     
-    # Check for very long lines (>300 chars) - indicates formatting issues
-    long_line_ratio = sum(1 for ln in lines if len(ln) > 300) / max(1, len(lines))
-    if long_line_ratio > 0.2:  # More than 20% of lines are very long
-        risks.append('Many very long lines (possible formatting/encoding issues)')
+    # NOTE: Long line detection disabled because PDF extractors often produce
+    # long lines due to how text flow is stored in PDFs. This caused false
+    # positives on well-formatted resumes.
+    # Modern resumes with columns, tables, etc. often extract as long lines.
     
     # Check for excessive ALL-CAPS text
-    all_caps_ratio = sum(1 for ln in lines if ln.strip().isupper()) / max(1, len(lines))
-    if all_caps_ratio > 0.1:  # More than 10% of lines are all caps
+    all_caps_ratio = sum(1 for ln in lines if ln.strip().isupper() and len(ln.strip()) > 10) / max(1, len(lines))
+    if all_caps_ratio > 0.2:  # More than 20% of lines are all caps (and long)
         risks.append('Excessive ALL-CAPS lines')
     
     return risks

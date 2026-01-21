@@ -582,7 +582,15 @@ function UserCard({ user, handleAssignClick, handleRemoveBadge }) {
                         style={{ backgroundColor: 'var(--accent-primary)' }}
                     >
                         {user.profilePicture ? (
-                            <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
+                            <img
+                                src={user.profilePicture}
+                                alt={user.name}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                    e.target.style.display = 'none';
+                                    e.target.insertAdjacentHTML('afterend', `<span style="color: white; font-weight: 600; font-size: 1.125rem">${user.name?.charAt(0)?.toUpperCase() || '?'}</span>`);
+                                }}
+                            />
                         ) : (
                             <span style={{ color: 'white', fontWeight: 600, fontSize: '1.125rem' }}>
                                 {user.name?.charAt(0)?.toUpperCase() || '?'}
@@ -653,7 +661,15 @@ function UserCard({ user, handleAssignClick, handleRemoveBadge }) {
                             }}
                         >
                             {badge.definition?.icon && (
-                                <img src={badge.definition.icon} alt="" className="w-4 h-4 object-contain" />
+                                <img
+                                    src={badge.definition.icon}
+                                    alt=""
+                                    className="w-4 h-4 object-contain"
+                                    onError={(e) => {
+                                        e.target.style.display = 'none';
+                                        e.target.insertAdjacentHTML('afterend', '<span style="font-size: 0.75rem">🏅</span>');
+                                    }}
+                                />
                             )}
                             <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', fontWeight: 500 }}>
                                 {badge.definition?.name || badge.badgeType}

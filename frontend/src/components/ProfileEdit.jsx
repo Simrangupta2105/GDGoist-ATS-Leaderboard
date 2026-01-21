@@ -215,9 +215,45 @@ export default function ProfileEdit() {
                         {error}
                     </div>
                 )}
+
+                {/* Success Popup */}
                 {success && (
-                    <div className="mb-6 p-4" style={{ backgroundColor: 'rgba(139, 154, 91, 0.15)', borderRadius: 'var(--radius-lg)', color: 'var(--accent-success)' }}>
-                        {success}
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center px-4 overflow-hidden">
+                        <div
+                            className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300"
+                            onClick={() => setSuccess('')}
+                        ></div>
+                        <div
+                            className="relative card w-full max-w-sm p-8 flex flex-col items-center text-center animate-in fade-in zoom-in duration-300"
+                            style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
+                        >
+                            <div
+                                className="w-20 h-20 rounded-full flex items-center justify-center mb-6"
+                                style={{ backgroundColor: 'rgba(139, 154, 91, 0.15)', border: '4px solid var(--bg-card-soft)' }}
+                            >
+                                <span className="text-4xl" style={{ color: 'var(--accent-success)' }}>✓</span>
+                            </div>
+
+                            <h3 style={{ color: 'var(--text-primary)', fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.5rem' }}>
+                                Saved Successfully!
+                            </h3>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.925rem' }}>
+                                Your profile and social connections have been updated.
+                            </p>
+
+                            <button
+                                onClick={() => setSuccess('')}
+                                className="mt-8 px-8 py-3 font-bold"
+                                style={{
+                                    backgroundColor: 'var(--accent-primary)',
+                                    color: 'white',
+                                    borderRadius: 'var(--radius-lg)',
+                                    boxShadow: '0 4px 12px rgba(212, 160, 83, 0.2)'
+                                }}
+                            >
+                                Got it
+                            </button>
+                        </div>
                     </div>
                 )}
 

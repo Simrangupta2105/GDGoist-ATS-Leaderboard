@@ -412,7 +412,15 @@ app.put('/me/profile', verifyToken, async (req, res) => {
     const user = await User.findByIdAndUpdate(req.user.id, { $set: updates }, { new: true }).select('-passwordHash')
     if (!user) return res.status(404).json({ error: 'User not found' })
 
-    console.log(`[Profile] Updated profile for user ${user.email}`)
+    // SYNC: Recalculate score (updates User model cache) and clear analytics cache
+    try {
+      await recalculateUserScore(user._id)
+      analyticsCache.clear()
+    } catch (scoreErr) {
+      console.error('[Profile] Score/Cache sync error:', scoreErr.message)
+    }
+
+    console.log(`[Profile] Updated profile for user ${user.email} and cleared cache`)
     return res.json({
       message: 'Profile updated successfully',
       profile: {
@@ -506,6 +514,9 @@ app.post('/me/avatar', verifyToken, async (req, res) => {
       { new: true }
     ).select('-passwordHash')
 
+    // SYNC: Clear cache for Admin visibility
+    analyticsCache.clear()
+
     return res.json({
       message: 'Avatar uploaded successfully',
       url: fileUrl,
@@ -540,6 +551,10 @@ app.get('/users/:userId/profile', async (req, res) => {
     const Badge = require('./models/badge.model')
     const userBadges = await Badge.find({ user: userId }).populate('definitionId').sort({ earnedAt: -1 })
 
+    // Lookup GitHub profile for avatar fallback
+    const GitHub = require('./models/github.model')
+    const githubDoc = await GitHub.findOne({ user: userId })
+
     const baseUrl = `${req.protocol}://${req.get('host')}`
 
     const formattedBadges = userBadges.map(b => {
@@ -558,12 +573,17 @@ app.get('/users/:userId/profile', async (req, res) => {
       }
     })
 
+    let finalAvatar = user.profilePicture || ''
+    if (!finalAvatar && githubDoc?.profile?.avatarUrl) {
+      finalAvatar = githubDoc.profile.avatarUrl
+    }
+
     return res.json({
       profile: {
         id: user._id, name: user.name, department: user.department, graduationYear: user.graduationYear,
-        bio: user.bio || '', profilePicture: user.profilePicture || '', socialLinks: user.socialLinks || {},
+        bio: user.bio || '', profilePicture: finalAvatar, socialLinks: user.socialLinks || {},
         projects: user.projects || [], experiences: user.experiences || [],
-        github: user.github?.username ? { username: user.github.username } : null,
+        github: githubDoc ? { username: githubDoc.githubUsername } : (user.github?.username ? { username: user.github.username } : null),
         score: latestScore ? { total: latestScore.totalScore, ats: latestScore.resumeScore, github: latestScore.githubScore, badges: latestScore.badgesScore } : null,
         badges: formattedBadges,
         isPrivate: false
@@ -603,7 +623,7 @@ const {
   getAuditLogs,
   exportUserData
 } = require('./privacyService')
-const { withCache } = require('./analyticsCache')
+const { withCache, analyticsCache } = require('./analyticsCache')
 const { generalLimiter, authLimiter, adminLimiter, uploadLimiter } = require('./middleware/rateLimit')
 
 // Generate a pre-signed upload URL for a resume (PUT). Returns resume metadata record and upload URL.
@@ -754,6 +774,10 @@ const crypto = require('crypto')
 // Public leaderboard (anonymous-by-default)
 // Query params: department, graduationYear, limit, page
 app.get('/leaderboard', async (req, res) => {
+  // Prevent browser caching of leaderboard data to show fresh syncs
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+  res.setHeader('Pragma', 'no-cache')
+  res.setHeader('Expires', '0')
   try {
     const { department, graduationYear, limit = 50, page = 1 } = req.query
     const pageNum = Math.max(1, parseInt(page, 10) || 1)
@@ -777,6 +801,16 @@ app.get('/leaderboard', async (req, res) => {
     const pipeline = [
       { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'userDoc' } },
       { $unwind: '$userDoc' },
+      // Lookup GitHub profile for avatar fallback
+      {
+        $lookup: {
+          from: 'githubs',
+          localField: 'user',
+          foreignField: 'user',
+          as: 'githubDoc'
+        }
+      },
+      { $unwind: { path: '$githubDoc', preserveNullAndEmptyArrays: true } },
       // Lookup badges and their definitions
       {
         $lookup: {
@@ -809,26 +843,37 @@ app.get('/leaderboard', async (req, res) => {
     const rankOffset = (pageNum - 1) * lim
     const baseUrl = `${req.protocol}://${req.get('host')}`
 
-    const entries = data.map((d, i) => ({
-      rank: rankOffset + i + 1,
-      userId: d.userDoc._id,
-      totalScore: d.totalScore,
-      name: d.userDoc.name || 'Anonymous',
-      department: d.userDoc.department || null,
-      graduationYear: d.userDoc.graduationYear || null,
-      profilePicture: d.userDoc.profilePicture || null,
-      badges: (d.badges || []).map(b => {
-        let iconUrl = b.definition ? b.definition.icon : (b.metadata?.icon || '🏅')
-        if (iconUrl && iconUrl.startsWith('/')) {
-          iconUrl = `${baseUrl}${iconUrl}`
-        }
-        return {
-          name: b.definition ? b.definition.name : b.badgeType,
-          icon: iconUrl,
-          points: b.definition ? b.definition.points : 0
-        }
-      }).slice(0, 3) // Top 3 badges only for leaderboard view
-    }))
+    const entries = data.map((d, i) => {
+      // Logic for profile picture fallback:
+      // 1. Manual profilePicture (S3/Local)
+      // 2. GitHub profile.avatarUrl
+      // 3. null (Initial fallback in UI)
+      let finalAvatar = d.userDoc.profilePicture || null
+      if (!finalAvatar && d.githubDoc?.profile?.avatarUrl) {
+        finalAvatar = d.githubDoc.profile.avatarUrl
+      }
+
+      return {
+        rank: rankOffset + i + 1,
+        userId: d.userDoc._id,
+        totalScore: d.totalScore,
+        name: d.userDoc.name || 'Anonymous',
+        department: d.userDoc.department || null,
+        graduationYear: d.userDoc.graduationYear || null,
+        profilePicture: finalAvatar,
+        badges: (d.badges || []).map(b => {
+          let iconUrl = b.definition ? b.definition.icon : (b.metadata?.icon || '🏅')
+          if (iconUrl && iconUrl.startsWith('/')) {
+            iconUrl = `${baseUrl}${iconUrl}`
+          }
+          return {
+            name: b.definition ? b.definition.name : b.badgeType,
+            icon: iconUrl,
+            points: b.definition ? b.definition.points : 0
+          }
+        }).slice(0, 3) // Top 3 badges only for leaderboard view
+      }
+    })
 
     return res.json({ totalCount, page: pageNum, limit: lim, entries })
   } catch (err) {
@@ -1201,14 +1246,19 @@ app.get('/peers/search', verifyToken, async (req, res) => {
       const Score = require('./models/score.model')
       const latestScore = await Score.findOne({ user: u._id }).sort({ createdAt: -1 })
 
-      let picUrl = u.profilePicture
-      if (picUrl && picUrl.startsWith('/')) picUrl = `${baseUrl}${picUrl}`
+      let finalAvatar = u.profilePicture || null
+      if (!finalAvatar && u.githubDoc?.profile?.avatarUrl) {
+        finalAvatar = u.githubDoc.profile.avatarUrl
+      }
+      if (finalAvatar && finalAvatar.startsWith('/')) finalAvatar = `${baseUrl}${finalAvatar}`
 
       return {
         id: u._id,
         name: u.name,
+        email: u.email,
         department: u.department,
         graduationYear: u.graduationYear,
+        profilePicture: finalAvatar,
         skills: u.githubDoc?.stats?.languages || [],
         score: latestScore ? latestScore.totalScore : 0,
         connected: false // TODO: Check actual connection status if needed
@@ -1729,7 +1779,20 @@ app.get('/admin/users', verifyToken, requireRole('admin'), async (req, res) => {
       .limit(parseInt(limit))
 
     const usersWithData = await Promise.all(users.map(async (u) => {
-      const badges = await Badge.find({ user: u._id }).populate('definitionId')
+      const [badges, githubDoc] = await Promise.all([
+        Badge.find({ user: u._id }).populate('definitionId'),
+        GitHub.findOne({ user: u._id })
+      ])
+
+      // Logic for profile picture fallback:
+      // 1. Manual profilePicture (S3/Local)
+      // 2. GitHub profile.avatarUrl
+      // 3. null (Initial fallback in UI)
+      let finalAvatar = u.profilePicture || null
+      if (!finalAvatar && githubDoc?.profile?.avatarUrl) {
+        finalAvatar = githubDoc.profile.avatarUrl
+      }
+
       return {
         id: u._id,
         name: u.name || 'Anonymous',
@@ -1741,7 +1804,8 @@ app.get('/admin/users', verifyToken, requireRole('admin'), async (req, res) => {
         githubScore: u.githubScore || 0,
         badgesScore: u.badgesScore || 0,
         hasResume: !!u.hasResume,
-        profilePicture: u.profilePicture,
+        profilePicture: finalAvatar,
+        githubUsername: githubDoc?.githubUsername || null,
         joinedAt: u.createdAt,
         badges: badges.map(b => {
           const bObj = b.toObject()
@@ -2098,7 +2162,13 @@ app.post('/admin/badges', verifyToken, requireRole('admin'), async (req, res) =>
     try {
       // Try S3 upload
       const s3Key = `badges/${iconFilename}`
-      iconUrl = await uploadFile(iconFile.data, s3Key, iconFile.mimetype)
+      await uploadFile(iconFile.data, s3Key, iconFile.mimetype)
+
+      const host = req.get('host')
+      const protocol = req.protocol
+      iconUrl = `${protocol}://${host}/files/${s3Key}`
+
+      console.log(`[Badge] Icon uploaded to S3 and using proxy URL: ${iconUrl}`)
     } catch (s3Err) {
       console.log('S3 Badge Upload failed, falling back to local:', s3Err.message)
 

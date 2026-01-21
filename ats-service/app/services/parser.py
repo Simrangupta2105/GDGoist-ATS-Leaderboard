@@ -111,14 +111,65 @@ def safe_extract_text(file_bytes: bytes, filename: str) -> Tuple[str, List[str]]
     return text, errors
 
 
+def preprocess_pdf_text(text: str) -> str:
+    """
+    Preprocess PDF text to fix common extraction issues.
+    
+    Many PDFs don't preserve newlines properly, causing section headers
+    to merge with content (e.g., "ExperienceSoftware Developer").
+    
+    This function inserts newlines before and after common section headers.
+    
+    Args:
+        text (str): Raw extracted PDF text
+    
+    Returns:
+        str: Text with section headers properly separated
+    """
+    # Replace form feed characters with newlines
+    processed = text.replace('\x0c', '\n')
+    
+    # Common section headers to detect and split
+    section_keywords = [
+        'Experience',
+        'Education', 
+        'Skills',
+        'Technical Skills',
+        'Projects',
+        'Certifications',
+        'Leadership',
+        'Extracurriculars',
+        'Achievements',
+        'Hackathon',
+        'Summary',
+        'Objective',
+        'Work Experience',
+        'Professional Experience',
+    ]
+    
+    for keyword in section_keywords:
+        # Insert newline BEFORE section headers preceded by non-space (word) characters
+        # Handles cases like: "content.SkillsPython" -> "content.\nSkillsPython"
+        pattern_before = r'(\w)(' + re.escape(keyword) + r')'
+        processed = re.sub(pattern_before, r'\1\n\2', processed, flags=re.IGNORECASE)
+        
+        # Insert newline AFTER section headers followed directly by word characters
+        # Handles cases like: "SkillsPython" -> "Skills\nPython"
+        pattern_after = r'(' + re.escape(keyword) + r')([A-Z][a-z])'
+        processed = re.sub(pattern_after, r'\1\n\2', processed, flags=re.IGNORECASE)
+    
+    return processed
+
+
 def find_section(text: str, section_names: List[str]) -> Optional[str]:
     """
     Find and extract a specific section from resume text.
     
     Resumes typically have sections like "Education", "Experience", "Skills", etc.
     This function uses a simple heuristic to find these sections:
-    1. Look for lines that start with one of the section names
-    2. Extract content until the next section header or blank line
+    1. Preprocess text to split merged section headers
+    2. Look for lines that start with one of the section names
+    3. Extract content until the next section header or blank line
     
     Args:
         text (str): Full resume text
@@ -132,14 +183,23 @@ def find_section(text: str, section_names: List[str]) -> Optional[str]:
         >>> find_section(resume, ['education'])
         'BS Computer Science'
     """
-    lines = text.splitlines()
+    # Preprocess text to handle merged section headers
+    processed_text = preprocess_pdf_text(text)
+    lines = processed_text.splitlines()
     idx = None
+    
+    # Common section headers for detecting end of current section
+    all_headers = [
+        'experience', 'education', 'skills', 'technical skills', 'projects',
+        'certifications', 'leadership', 'extracurriculars', 'achievements',
+        'hackathon', 'summary', 'objective', 'work experience', 'professional experience'
+    ]
     
     # Find the line where the section starts
     for i, ln in enumerate(lines):
         l = ln.strip().lower()
         for name in section_names:
-            if l.startswith(name):
+            if l.startswith(name) or name in l:
                 idx = i
                 break
         if idx is not None:
@@ -152,6 +212,8 @@ def find_section(text: str, section_names: List[str]) -> Optional[str]:
     # Collect lines after the section header
     collected = []
     for ln in lines[idx + 1:]:
+        l_lower = ln.strip().lower()
+        
         # Stop at blank lines (if we already have content)
         if not ln.strip():
             if collected:
@@ -159,7 +221,17 @@ def find_section(text: str, section_names: List[str]) -> Optional[str]:
             else:
                 continue
         
-        # Stop at next section header (heuristic: all caps or ends with ':')
+        # Stop at next section header
+        is_next_section = False
+        for header in all_headers:
+            if header != section_names[0].lower() and (l_lower.startswith(header) or l_lower == header):
+                is_next_section = True
+                break
+        
+        if is_next_section:
+            break
+        
+        # Stop at all caps headers or colon-ended headers
         if re.match(r'^[A-Z\s]{3,}$', ln.strip()) or ln.strip().endswith(':'):
             break
         

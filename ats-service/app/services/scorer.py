@@ -6,24 +6,43 @@ It determines how well a resume matches a job description.
 
 Key Responsibilities:
 - Calculate semantic similarity between resume and job description
-- Compute heuristic scores based on resume structure
+- Compute heuristic scores based on resume QUALITY (not just presence)
 - Generate feedback and recommendations
-- Normalize final scores to 0-100 range
+- Normalize final scores to 0-100 range (realistic max ~90)
 
-Scoring Components:
-1. Heuristic Score (0-50): Based on resume structure and completeness
-   - Education section: 12 points
-   - Experience section: 18 points
-   - Skills section: 10 points
-   - Contact info: 10 points
-   - Formatting penalties: -10 points
-   - Parsing error penalties: -20 points
+SCORING BREAKDOWN (v4 - Strict & Equal):
+========================================
 
-2. Relevance Score (0-50): Based on similarity to job description
-   - Uses TF-IDF or SBERT for semantic matching
-   - Converted to 0-50 scale
+1. HEURISTIC SCORE (5 sections × 10 points = 50 max):
+   
+   | Section    | Max | How to Score High                      |
+   |------------|-----|----------------------------------------|
+   | Education  | 10  | Degree level (PhD=7, MS=6, BS=5) +     |
+   |            |     | relevant field + top institution       |
+   | Experience | 10  | Action verbs (3) + metrics (3) +       |
+   |            |     | seniority (2) + top company (1)        |
+   | Skills     | 10  | 26+ skills = 10, 21-25 = 9, etc.       |
+   | Projects   | 10  | Tech stack (3) + impact (2) +          |
+   |            |     | links (2) + multiple projects (1)      |
+   | Contact    | 10  | Email (3) + Phone (2) + LinkedIn (2) + |
+   |            |     | GitHub (2) + Portfolio (1)             |
+   |------------|-----|----------------------------------------|
+   | MAX TOTAL  | 50  |                                        |
 
-Total Score: Heuristic + Relevance = 0-100
+2. RELEVANCE SCORE (0-50):
+   - TF-IDF or SBERT similarity to job description
+   - Low relevance (<0.3) penalized more harshly
+
+3. FINAL SCORE (0-100 with realistic scaling):
+   - WITHOUT JD: Heuristic × 2 × 0.98 = MAX 98
+   - WITH JD:    (Heuristic + Relevance) × 0.98 = MAX 98
+   
+   Score Interpretation:
+   - 95+ = Exceptional (nearly impossible)
+   - 85-94 = Excellent (top ~5%)
+   - 75-84 = Good
+   - 65-74 = Average
+   - <65 = Needs improvement
 """
 
 from typing import Optional, Tuple, Dict, List, Any
@@ -138,17 +157,26 @@ def ats_similarity_score_sbert(resume_text: str, jd_text: str,
 def compute_heuristics(text: str, parsed_sections: dict, 
                        parsing_errors: List[str]) -> Tuple[float, List[str], Dict[str, float]]:
     """
-    Compute heuristic score based on resume structure and completeness.
+    Compute heuristic score based on resume QUALITY - not just presence.
     
-    This function evaluates the resume's quality independent of job matching:
-    - Does it have all expected sections?
-    - Is contact information present?
-    - Are there formatting issues?
-    - Were there parsing errors?
+    EQUAL SCORING (v4 - Strict):
+    ============================
+    Each of 5 sections is scored 0-10 based on QUALITY.
+    Nobody gets easy points just for having a section!
+    
+    | Section    | Max | How to Score High                      |
+    |------------|-----|----------------------------------------|
+    | Education  | 10  | Degree level + relevant field          |
+    | Experience | 10  | Action verbs + metrics + depth         |
+    | Skills     | 10  | Quantity (20+) + diversity             |
+    | Projects   | 10  | Technical complexity + impact          |
+    | Contact    | 10  | Complete (email + phone + LinkedIn)    |
+    |------------|-----|----------------------------------------|
+    | TOTAL      | 50  |                                        |
     
     Args:
         text (str): Full resume text
-        parsed_sections (dict): Dictionary of extracted sections (education, experience, skills)
+        parsed_sections (dict): Dictionary of extracted sections
         parsing_errors (List[str]): List of errors encountered during parsing
     
     Returns:
@@ -157,59 +185,95 @@ def compute_heuristics(text: str, parsed_sections: dict,
         - feedback (List[str]): List of feedback messages
         - breakdown (Dict[str, float]): Score breakdown by component
     """
+    from app.services.extractor import extract_skills_from_resume
+    from app.services.parser import extract_contact_info
+    
     score = 0.0
     feedback = []
     breakdown = {
         'education': 0,
         'experience': 0,
         'skills': 0,
+        'projects': 0,
         'contact': 0,
-        'formattingPenalty': 0,
         'parsingPenalty': 0
     }
     
-    # Check for Education section (12 points)
-    if parsed_sections.get('education'):
-        breakdown['education'] = 12
-        score += 12
-    else:
-        feedback.append('Missing Education section')
+    text_lower = text.lower()
     
-    # Check for Experience section (18 points - most important)
-    if parsed_sections.get('experience'):
-        breakdown['experience'] = 18
-        score += 18
-    else:
-        feedback.append('Missing Experience section')
+    # ============================================
+    # EDUCATION (0-10 points) - Quality based
+    # ============================================
+    education_text = parsed_sections.get('education', '') or ''
+    edu_score = _score_education(education_text, text_lower)
+    breakdown['education'] = round(edu_score, 1)
+    score += edu_score
     
-    # Check for Skills section (10 points)
-    if parsed_sections.get('skills'):
-        breakdown['skills'] = 10
-        score += 10
-    else:
-        feedback.append('Missing Skills section')
+    if edu_score < 5:
+        if edu_score == 0:
+            feedback.append('Missing or undetected Education section')
+        else:
+            feedback.append('Education section lacks detail - include degree, field, and institution')
     
-    # Check for Contact information (10 points)
-    from app.services.parser import extract_contact_info
+    # ============================================
+    # EXPERIENCE (0-10 points) - Quality based
+    # ============================================
+    experience_text = parsed_sections.get('experience', '') or ''
+    exp_score = _score_experience(experience_text, text_lower)
+    breakdown['experience'] = round(exp_score, 1)
+    score += exp_score
+    
+    if exp_score < 5:
+        if exp_score == 0:
+            feedback.append('Missing or undetected Experience section')
+        else:
+            feedback.append('Experience lacks impact - add action verbs (led, developed, increased) and quantified results (40%, $1M, 10K users)')
+    
+    # ============================================
+    # SKILLS (0-10 points) - Quality based
+    # ============================================
+    all_skills = extract_skills_from_resume(text)
+    skill_count = len(all_skills)
+    skills_score = _score_skills(skill_count, all_skills)
+    breakdown['skills'] = round(skills_score, 1)
+    score += skills_score
+    
+    if skills_score < 5:
+        feedback.append(f'Only {skill_count} technical skills detected - add more relevant technologies (target: 20+)')
+    
+    # ============================================
+    # PROJECTS (0-10 points) - Quality based
+    # ============================================
+    projects_text = parsed_sections.get('projects', '') or ''
+    proj_score = _score_projects(projects_text, text_lower)
+    breakdown['projects'] = round(proj_score, 1)
+    score += proj_score
+    
+    if proj_score < 5:
+        if proj_score == 0:
+            feedback.append('Missing Projects section - showcase your work with technical details')
+        else:
+            feedback.append('Projects need more detail - include tech stack, your role, and impact')
+    
+    # ============================================
+    # CONTACT (0-10 points) - Completeness based
+    # ============================================
     contact = extract_contact_info(text)
-    if contact.get('email') or contact.get('phone'):
-        breakdown['contact'] = 10
-        score += 10
-    else:
-        feedback.append('Missing or invalid contact information')
+    contact_score = _score_contact(contact, text_lower)
+    breakdown['contact'] = round(contact_score, 1)
+    score += contact_score
     
-    # Check for formatting risks (-10 points)
-    risks = detect_formatting_risks(text)
-    if risks:
-        breakdown['formattingPenalty'] = -10
-        score -= 10
-        feedback.extend(['Formatting risk: ' + r for r in risks])
+    if contact_score < 5:
+        feedback.append('Contact info incomplete - add email, phone, and LinkedIn/GitHub')
     
-    # Parsing errors penalty (-20 points)
+    # ============================================
+    # PARSING PENALTY (-10 points max)
+    # ============================================
     if parsing_errors:
-        breakdown['parsingPenalty'] = -20
-        score -= 20
-        feedback.append('Parsing issues detected: ' + '; '.join(parsing_errors))
+        penalty = min(10, len(parsing_errors) * 5)
+        breakdown['parsingPenalty'] = -penalty
+        score -= penalty
+        feedback.append('Parsing issues detected: ' + '; '.join(parsing_errors[:3]))
     
     # Clamp score to [0, 50]
     score = max(0.0, min(50.0, score))
@@ -217,16 +281,331 @@ def compute_heuristics(text: str, parsed_sections: dict,
     return score, feedback, breakdown
 
 
+def _score_education(education_text: str, full_text: str) -> float:
+    """
+    Score education section based on quality (0-10).
+    
+    Scoring:
+    - 0: Missing section
+    - 2: Has section but minimal info
+    - 5: Degree mentioned
+    - 7: Degree + relevant field (CS, Engineering, etc.)
+    - 9: Degree + field + recognized institution
+    - 10: Graduate degree or top institution
+    """
+    if not education_text and 'education' not in full_text:
+        return 0.0
+    
+    text = (education_text + ' ' + full_text).lower()
+    score = 2.0  # Base for having section
+    
+    # Degree types (higher = better)
+    if any(deg in text for deg in ['ph.d', 'phd', 'doctorate', 'doctoral']):
+        score += 5.0
+    elif any(deg in text for deg in ['master', 'm.s.', 'm.sc', 'mba', 'm.tech', 'mtech']):
+        score += 4.0
+    elif any(deg in text for deg in ['bachelor', 'b.s.', 'b.sc', 'b.tech', 'btech', 'b.e.', 'undergraduate']):
+        score += 3.0
+    elif any(deg in text for deg in ['diploma', 'associate', 'certificate']):
+        score += 1.5
+    
+    # Relevant field
+    relevant_fields = ['computer science', 'software', 'engineering', 'information technology',
+                       'data science', 'artificial intelligence', 'machine learning', 'mathematics',
+                       'electrical', 'electronics', 'cs', 'cse', 'it', 'ece']
+    if any(field in text for field in relevant_fields):
+        score += 1.5
+    
+    # Top institutions (partial list - add more as needed)
+    top_schools = ['mit', 'stanford', 'iit', 'nit', 'iiit', 'bits', 'harvard', 'berkeley',
+                   'carnegie mellon', 'georgia tech', 'caltech', 'oxford', 'cambridge']
+    if any(school in text for school in top_schools):
+        score += 1.0
+    
+    return min(10.0, score)
+
+
+def _score_experience(experience_text: str, full_text: str) -> float:
+    """
+    Score experience section based on quality (0-10).
+    
+    Scoring criteria:
+    - Experience duration: 6+ months = up to 4 points
+    - Action verbs: Led, developed, implemented, etc. = up to 2.5 points
+    - Quantified achievements: %, $, numbers = up to 2 points
+    - Seniority indicators: Senior, Lead, Manager = up to 1 point
+    - Company recognition = up to 0.5 points
+    """
+    if not experience_text and 'experience' not in full_text:
+        return 0.0
+    
+    text = (experience_text + ' ' + full_text).lower()
+    score = 0.0
+    
+    import re
+    
+    # Experience Duration (up to 4 points) - KEY FACTOR
+    # Look for patterns like "2 years", "6 months", "1.5 years", etc.
+    duration_patterns = [
+        r'(\d+\.?\d*)\s*(?:years?|yrs?)',
+        r'(\d+\.?\d*)\s*(?:months?|mos?)',
+    ]
+    
+    total_months = 0
+    for pattern in duration_patterns:
+        matches = re.findall(pattern, text)
+        for match in matches:
+            val = float(match)
+            if 'year' in pattern or 'yr' in pattern:
+                total_months += val * 12
+            else:
+                total_months += val
+    
+    # Duration scoring
+    # Duration scoring (Max 4.0 points)
+    found_duration = False
+    if total_months >= 6:
+        score += 4.0
+        found_duration = True
+    elif total_months >= 3:
+        score += 3.0
+        found_duration = True
+    elif total_months >= 1:
+        score += 2.0
+        found_duration = True
+    
+    # Fallback: Date range detection if no explicit "X years" found
+    if not found_duration:
+        # Check for years (2010-2029)
+        years = re.findall(r'20[12]\d', text)
+        distinct_years = len(set(years))
+        
+        if distinct_years >= 2:
+            score += 4.0  # Spans multiple years -> likely >6 months
+        elif distinct_years == 1 and ('present' in text or 'current' in text):
+            score += 4.0  # Year + Present -> likely >6 months
+        elif distinct_years == 1:
+            score += 2.5  # At least mentions a year
+        elif len(text) > 200:
+            score += 1.0  # Decent length description as fallback
+    
+    # Action verbs (up to 2.5 points)
+    action_verbs = [
+        'led', 'developed', 'implemented', 'designed', 'architected', 'built',
+        'managed', 'created', 'optimized', 'improved', 'reduced', 'increased',
+        'delivered', 'launched', 'mentored', 'scaled', 'automated', 'integrated',
+        'deployed', 'spearheaded', 'established', 'transformed', 'pioneered'
+    ]
+    action_count = sum(1 for v in action_verbs if v in text)
+    score += min(2.5, action_count * 0.35)
+    
+    # Quantified achievements (up to 2 points)
+    metrics = re.findall(r'\d+%|\$\d+[kmb]?|\d+\s*(?:users|customers|clients|projects|applications|team|engineers|developers)', text)
+    score += min(2.0, len(metrics) * 0.4)
+    
+    # Seniority (up to 1 point)
+    seniority = ['senior', 'lead', 'principal', 'staff', 'architect', 'manager', 'director', 'head', 'vp', 'cto', 'ceo']
+    seniority_count = sum(1 for s in seniority if s in text)
+    score += min(1.0, seniority_count * 0.5)
+    
+    # Recognized companies (up to 0.5 points)
+    top_companies = ['google', 'amazon', 'microsoft', 'meta', 'facebook', 'apple', 'netflix',
+                     'uber', 'airbnb', 'stripe', 'linkedin', 'twitter', 'salesforce', 'adobe']
+    if any(company in text for company in top_companies):
+        score += 0.5
+    
+    return min(10.0, round(score, 1))
+
+
+def _score_skills(skill_count: int, skills_list: List) -> float:
+    """
+    Score skills based on quantity and diversity (0-10).
+    
+    Scoring:
+    - 0: 0.0
+    - 1-5 skills: 2.0 + (count * 0.2)
+    - 6-15 skills: 3.0 + (count - 5) * 0.4
+    - 16-24 skills: 7.0 + (count - 15) * 0.3
+    - 25+ skills: 10.0
+    """
+    if skill_count == 0:
+        return 0.0
+    
+    if skill_count <= 5:
+        return round(2.0 + (skill_count * 0.2), 1)
+    elif skill_count <= 15:
+        return round(3.0 + ((skill_count - 5) * 0.4), 1)
+    elif skill_count < 25:
+        return round(7.0 + ((skill_count - 15) * 0.3), 1)
+    else:
+        return 10.0
+
+
+def _score_projects(projects_text: str, full_text: str) -> float:
+    """
+    Score projects section based on quality (0-10).
+    
+    Scoring criteria:
+    - Presence of project descriptions
+    - Technical stack mentions
+    - Impact/results described
+    - Links to GitHub/live demos
+    """
+    # Check for projects section or project-like content
+    if not projects_text:
+        # Try to find projects mentioned elsewhere
+        project_indicators = ['github.com', 'project:', 'built a', 'created a', 'developed a', 'hackathon']
+        if not any(ind in full_text for ind in project_indicators):
+            return 0.0
+        text = full_text
+    else:
+        text = projects_text + ' ' + full_text
+    
+    text_lower = text.lower()
+    score = 2.0  # Base for having projects
+    
+    # Technical stack mentioned (up to 3 points)
+    tech_indicators = ['react', 'node', 'python', 'javascript', 'typescript', 'java', 'golang', 'rust',
+                       'aws', 'docker', 'kubernetes', 'mongodb', 'postgresql', 'api', 'machine learning',
+                       'tensorflow', 'pytorch', 'database', 'microservices']
+    tech_count = sum(1 for t in tech_indicators if t in text_lower)
+    score += min(3.0, tech_count * 0.5)
+    
+    # Project impact/metrics (up to 2 points)
+    import re
+    impact_patterns = re.findall(r'\d+\s*(?:users|downloads|stars|forks|views)|deployed|production|live', text_lower)
+    score += min(2.0, len(impact_patterns) * 0.5)
+    
+    # Links to work (up to 2 points)
+    links = ['github.com', 'gitlab.com', 'bitbucket', 'herokuapp', 'vercel', 'netlify', 'http://', 'https://']
+    link_count = sum(1 for l in links if l in text_lower)
+    score += min(2.0, link_count * 0.7)
+    
+    # Multiple projects mentioned (up to 1 point)
+    project_words = text_lower.count('project')
+    if project_words >= 3:
+        score += 1.0
+    elif project_words >= 2:
+        score += 0.5
+    
+    return min(10.0, score)
+
+
+def _score_contact(contact: dict, full_text: str) -> float:
+    """
+    Score contact information based on completeness (0-10).
+    
+    Scoring:
+    - Email: 3 points
+    - Phone: 2 points
+    - LinkedIn: 2 points
+    - GitHub: 2 points
+    - Portfolio/Website: 1 point
+    """
+    score = 0.0
+    
+    # Email (3 points)
+    if contact.get('email'):
+        score += 3.0
+    
+    # Phone (2 points)
+    if contact.get('phone'):
+        score += 2.0
+    
+    # LinkedIn (2 points)
+    if 'linkedin.com' in full_text or 'linkedin' in full_text:
+        score += 2.0
+    
+    # GitHub (2 points)
+    if 'github.com' in full_text or 'github' in full_text:
+        score += 2.0
+    
+    # Portfolio/Website (1 point)
+    portfolio_indicators = ['portfolio', 'website', '.com/', '.io/', 'vercel.app', 'netlify.app']
+    if any(ind in full_text for ind in portfolio_indicators):
+        score += 1.0
+    
+    return min(10.0, score)
+
+
+def _compute_experience_depth(experience_section: str, full_text: str) -> float:
+    """
+    Compute experience depth score based on quality indicators.
+    
+    Looks for:
+    - Action verbs (led, developed, implemented, etc.)
+    - Quantified achievements (numbers, percentages)
+    - Technical terms
+    - Seniority indicators (lead, senior, architect, etc.)
+    
+    Returns:
+        float: Score from 0-10
+    """
+    text_to_analyze = experience_section if experience_section else full_text
+    text_lower = text_to_analyze.lower()
+    
+    score = 0.0
+    
+    # Action verbs indicate impactful experience (up to 3 points)
+    action_verbs = [
+        'led', 'developed', 'implemented', 'designed', 'architected',
+        'managed', 'built', 'created', 'optimized', 'improved',
+        'reduced', 'increased', 'delivered', 'launched', 'mentored',
+        'scaled', 'automated', 'integrated', 'deployed', 'spearheaded'
+    ]
+    action_count = sum(1 for verb in action_verbs if verb in text_lower)
+    score += min(3.0, action_count * 0.5)
+    
+    # Quantified achievements indicate measurable impact (up to 3 points)
+    import re
+    numbers = re.findall(r'\d+%|\$\d+|\d+\s*(?:users|customers|engineers|developers|team|projects|applications)', text_lower)
+    score += min(3.0, len(numbers) * 0.75)
+    
+    # Seniority indicators (up to 2 points)
+    seniority_terms = ['senior', 'lead', 'principal', 'staff', 'architect', 'manager', 'director', 'head of']
+    seniority_count = sum(1 for term in seniority_terms if term in text_lower)
+    score += min(2.0, seniority_count * 1.0)
+    
+    # Technical breadth - multiple technology mentions (up to 2 points)
+    tech_terms = ['api', 'database', 'cloud', 'aws', 'gcp', 'azure', 'kubernetes', 'docker', 
+                  'microservices', 'ci/cd', 'agile', 'scrum', 'testing', 'security']
+    tech_count = sum(1 for term in tech_terms if term in text_lower)
+    score += min(2.0, tech_count * 0.4)
+    
+    return min(10.0, score)
+
+
 def normalize_score(heuristics_score: float, 
                     relevance: Optional[float]) -> Tuple[float, Dict[str, float]]:
     """
-    Normalize final ATS score to 0-100 range.
+    Normalize final ATS score to 0-100 range with REALISTIC scaling.
     
-    Combines:
-    - Heuristic score (0-50): Resume structure quality
-    - Relevance score (0-50): Job description match
+    SCORING BREAKDOWN (all scores out of 100):
+    ==========================================
     
-    If no job description is provided, heuristic score is doubled.
+    1. HEURISTIC SCORE (max 50 points internally, scaled to 100):
+       - Education section:     8 pts  (out of 50)
+       - Experience section:   12 pts  (out of 50)
+       - Skills section:        5 pts  (out of 50)
+       - Skill Count Bonus:    10 pts  (out of 50) - based on # of tech skills
+       - Experience Depth:     10 pts  (out of 50) - action verbs, metrics
+       - Contact info:          5 pts  (out of 50)
+       TOTAL HEURISTIC: 50 pts max
+    
+    2. RELEVANCE SCORE (max 50 points internally):
+       - TF-IDF or SBERT similarity to job description
+       - Score of 0.0-1.0 scaled to 0-50 points
+    
+    3. FINAL SCORE CALCULATION:
+       - With JD:    (Heuristic + Relevance) × 0.92 = max ~92
+       - Without JD: Heuristic × 2 × 0.90 = max ~90
+       
+    The 0.90-0.92 scaling ensures scores are REALISTIC:
+       - 90+ = Exceptional (top 1%)
+       - 80-89 = Excellent
+       - 70-79 = Good
+       - 60-69 = Average
+       - Below 60 = Needs improvement
     
     Args:
         heuristics_score (float): Score from compute_heuristics (0-50)
@@ -234,23 +613,39 @@ def normalize_score(heuristics_score: float,
     
     Returns:
         Tuple containing:
-        - total_score (float): Final score (0-100)
+        - total_score (float): Final score (0-100, realistic max ~92)
         - breakdown (Dict[str, float]): Score breakdown
     """
+    # REALISTIC SCALING FACTORS
+    SCALE_WITH_JD = 0.98     # Max ~98 with job description
+    SCALE_WITHOUT_JD = 0.98  # Max ~98 without job description
+    
     if relevance is None or relevance == 0.0:
-        # No job description provided - double the heuristic score
-        total = heuristics_score * 2.0
+        # No job description provided - stricter scaling
+        # Heuristic doubled but then scaled down
+        raw_total = heuristics_score * 2.0
+        total = raw_total * SCALE_WITHOUT_JD
         breakdown = {
-            'heuristics': heuristics_score * 2.0,
-            'relevance': 0.0
+            'heuristics': round(heuristics_score * 2.0, 2),
+            'relevance': 0.0,
+            'scalingFactor': SCALE_WITHOUT_JD
         }
     else:
-        # Convert relevance (0-1) to 0-50 scale
-        relevance_component = relevance * 50.0
-        total = heuristics_score + relevance_component
+        # With job description - relevance has diminishing returns
+        # Low relevance (<0.3) is penalized more harshly
+        if relevance < 0.3:
+            relevance_component = relevance * 35.0  # Max 10.5 for low match
+        elif relevance < 0.6:
+            relevance_component = 10.5 + (relevance - 0.3) * 45.0  # 10.5 to 24
+        else:
+            relevance_component = 24 + (relevance - 0.6) * 65.0  # 24 to 50
+        
+        raw_total = heuristics_score + relevance_component
+        total = raw_total * SCALE_WITH_JD
         breakdown = {
-            'heuristics': heuristics_score,
-            'relevance': relevance_component
+            'heuristics': round(heuristics_score, 2),
+            'relevance': round(relevance_component, 2),
+            'scalingFactor': SCALE_WITH_JD
         }
     
     # Clamp to [0, 100]

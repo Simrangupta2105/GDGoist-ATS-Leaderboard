@@ -6,6 +6,8 @@ export default function PeerDiscovery() {
   const [peers, setPeers] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [selectedPeer, setSelectedPeer] = useState(null)
+  const [copied, setCopied] = useState(false)
   const { apiCall } = useAuth()
 
   const handleSearch = async () => {
@@ -29,7 +31,18 @@ export default function PeerDiscovery() {
     }
   }
 
-  const handleConnect = async (peerId) => {
+  const handleConnectClick = (peer) => {
+    setSelectedPeer(peer)
+    setCopied(false)
+  }
+
+  const handleCopyEmail = (email) => {
+    navigator.clipboard.writeText(email)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleConnectProcess = async (peerId) => {
     try {
       const response = await apiCall(`/peers/${peerId}/connect`, {
         method: 'POST'
@@ -119,12 +132,24 @@ export default function PeerDiscovery() {
             >
               <div className="flex items-center gap-4">
                 <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center"
+                  className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden"
                   style={{ backgroundColor: 'var(--accent-primary)' }}
                 >
-                  <span style={{ color: 'white', fontWeight: 600, fontSize: '1.125rem' }}>
-                    {peer.name?.charAt(0) || '?'}
-                  </span>
+                  {peer.profilePicture ? (
+                    <img
+                      src={peer.profilePicture}
+                      alt={peer.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        e.target.insertAdjacentHTML('afterend', `<span style="color: white; font-weight: 600; font-size: 1.125rem">${peer.name?.charAt(0) || '?'}</span>`);
+                      }}
+                    />
+                  ) : (
+                    <span style={{ color: 'white', fontWeight: 600, fontSize: '1.125rem' }}>
+                      {peer.name?.charAt(0) || '?'}
+                    </span>
+                  )}
                 </div>
                 <div>
                   <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{peer.name}</div>
@@ -168,7 +193,7 @@ export default function PeerDiscovery() {
                 </div>
                 <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>ATS Score</div>
                 <button
-                  onClick={() => handleConnect(peer.id)}
+                  onClick={() => handleConnectClick(peer)}
                   disabled={peer.connected}
                   className="mt-2 px-4 py-1.5 font-medium"
                   style={{
@@ -199,6 +224,101 @@ export default function PeerDiscovery() {
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
             Search by name or skills to find classmates
           </p>
+        </div>
+      )}
+
+      {/* Connection Modal */}
+      {selectedPeer && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center px-4 overflow-hidden">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setSelectedPeer(null)}
+          ></div>
+          <div
+            className="relative card w-full max-w-md p-8 animate-in fade-in zoom-in duration-300"
+            style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
+          >
+            <button
+              onClick={() => setSelectedPeer(null)}
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-white/5 transition-colors"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              ✕
+            </button>
+
+            <div className="flex flex-col items-center text-center">
+              <div
+                className="w-20 h-20 rounded-full flex items-center justify-center mb-4 overflow-hidden"
+                style={{ backgroundColor: 'var(--accent-primary)', border: '4px solid var(--bg-card-soft)' }}
+              >
+                {selectedPeer.profilePicture ? (
+                  <img
+                    src={selectedPeer.profilePicture}
+                    alt={selectedPeer.name}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.insertAdjacentHTML('afterend', `<span style="color: white; font-weight: 700; font-size: 2rem">${selectedPeer.name?.charAt(0) || '?'}</span>`);
+                    }}
+                  />
+                ) : (
+                  <span style={{ color: 'white', fontWeight: 700, fontSize: '2rem' }}>
+                    {selectedPeer.name?.charAt(0) || '?'}
+                  </span>
+                )}
+              </div>
+
+              <h2 style={{ color: 'var(--text-primary)', fontSize: '1.5rem', fontWeight: 700 }}>
+                {selectedPeer.name}
+              </h2>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '0.25rem' }}>
+                {selectedPeer.department}
+              </p>
+              <p style={{ color: 'var(--accent-primary)', fontSize: '0.875rem', fontWeight: 500 }}>
+                Class of {selectedPeer.graduationYear}
+              </p>
+
+              <div className="w-full mt-8 p-4 rounded-xl" style={{ backgroundColor: 'var(--bg-card-soft)', border: '1px solid var(--border-subtle)' }}>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Student Email
+                </p>
+                <div
+                  onClick={() => handleCopyEmail(selectedPeer.email)}
+                  className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg cursor-pointer hover:bg-white/5 transition-all group"
+                  style={{ border: '1px dashed var(--border-subtle)' }}
+                >
+                  <span className="truncate flex-1" style={{ color: 'var(--text-primary)', fontWeight: 500, fontSize: '0.925rem' }}>
+                    {selectedPeer.email || 'No email provided'}
+                  </span>
+                  <div
+                    className="flex-shrink-0 px-2 py-1 rounded text-[10px] font-bold uppercase transition-all"
+                    style={{
+                      backgroundColor: copied ? 'var(--accent-success)' : 'var(--bg-card)',
+                      color: copied ? 'white' : 'var(--text-muted)'
+                    }}
+                  >
+                    {copied ? 'Copied!' : 'Copy'}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  handleConnectProcess(selectedPeer.id)
+                  setSelectedPeer(null)
+                }}
+                className="w-full mt-6 py-3 font-bold"
+                style={{
+                  backgroundColor: 'var(--accent-primary)',
+                  color: 'white',
+                  borderRadius: 'var(--radius-lg)',
+                  boxShadow: '0 4px 12px rgba(212, 160, 83, 0.2)'
+                }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

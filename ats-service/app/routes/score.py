@@ -23,7 +23,7 @@ from typing import Optional, Dict, Any
 import traceback
 
 from app.services.parser import safe_extract_text, find_section, extract_contact_info
-from app.services.extractor import extract_skills_from_section
+from app.services.extractor import extract_skills_from_section, extract_skills_from_resume
 from app.services.scorer import (
     ats_similarity_score_sbert,
     compute_heuristics,
@@ -116,6 +116,9 @@ async def parse_resume(
         )
         parsed['skills'] = extract_skills_from_section(skills_section)
         
+        # Also extract skills from full resume (used for scoring)
+        all_skills = extract_skills_from_resume(raw_text)
+        
         # Extract education section
         parsed['education'] = find_section(
             raw_text,
@@ -165,7 +168,7 @@ async def parse_resume(
         # Step 9: Build response
         result = {
             'rawText': raw_text,
-            'parsedSkills': parsed['skills'],
+            'parsedSkills': all_skills,  # Use full resume skills (matches scoring)
             'parsingErrors': parsing_errors,
             'atsScore': final_score,
             'breakdown': {**heur_breakdown, **norm_breakdown},

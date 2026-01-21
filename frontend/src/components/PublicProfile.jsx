@@ -85,7 +85,16 @@ export default function PublicProfile() {
                     <div className="flex flex-col items-center text-center">
                         <div className="w-24 h-24 mb-4 rounded-full flex items-center justify-center overflow-hidden" style={{ backgroundColor: 'var(--accent-primary)' }}>
                             {profile.profilePicture ? (
-                                <img src={profile.profilePicture} alt={profile.name} className="w-full h-full object-cover" />
+                                <img
+                                    src={profile.profilePicture}
+                                    alt={profile.name}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                        e.target.onerror = null;
+                                        e.target.style.display = 'none';
+                                        e.target.parentNode.innerHTML = `<span style="color: white; font-size: 2rem; font-weight: 700">${profile.name?.charAt(0) || '?'}</span>`;
+                                    }}
+                                />
                             ) : (
                                 <span style={{ color: 'white', fontSize: '2rem', fontWeight: 700 }}>{profile.name?.charAt(0) || '?'}</span>
                             )}
@@ -135,6 +144,11 @@ export default function PublicProfile() {
                                 {profile.socialLinks.twitter && (
                                     <a href={profile.socialLinks.twitter} target="_blank" rel="noopener noreferrer" className="px-4 py-2" style={{ backgroundColor: 'var(--bg-card-soft)', borderRadius: 'var(--radius-lg)', color: 'var(--text-secondary)' }}>
                                         Twitter
+                                    </a>
+                                )}
+                                {profile.socialLinks.instagram && (
+                                    <a href={profile.socialLinks.instagram} target="_blank" rel="noopener noreferrer" className="px-4 py-2" style={{ backgroundColor: 'var(--bg-card-soft)', borderRadius: 'var(--radius-lg)', color: 'var(--text-secondary)' }}>
+                                        Instagram
                                     </a>
                                 )}
                                 {profile.socialLinks.portfolio && (
